@@ -14,6 +14,8 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont, ImageOps
 
+from print3d.paths import default_jobs_dir
+
 GRID_LONG_SIDE_PX = 1600
 MAX_ZOOM = 8.0
 NICE_STEPS = (1, 2, 5, 10, 20, 25, 50, 100, 200, 250, 500, 1000)
@@ -31,12 +33,15 @@ def _nice_step(span: float, lines: int = 16) -> int:
 
 def grid(
     photo: Path,
-    out: Path,
+    out: Path | None = None,
     *,
     crop: tuple[float, float, float, float] | None = None,
     step: int | None = None,
 ) -> dict[str, object]:
     """Draw labelled photo-pixel coordinates over the photo or a crop of it."""
+    if out is None:
+        suffix = "_" + "_".join(str(int(v)) for v in crop) if crop else ""
+        out = default_jobs_dir() / "grid" / f"{photo.stem}{suffix}.png"
     image = open_upright(photo)
     width, height = image.size
     x0, y0, x1, y1 = crop or (0, 0, width, height)

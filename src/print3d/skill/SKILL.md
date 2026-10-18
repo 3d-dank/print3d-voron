@@ -7,8 +7,9 @@ disable-model-invocation: true
 
 # /print3d — idea to a printable X2D part
 
-Run everything from the repo root (the parent of this skill folder). `print3d` below means
-`.venv/bin/python -m print3d`.
+`print3d` below is the print3d command line. When the shell cannot find it, the
+print3d MCP tools of the same names do the same work. A job's files live in the
+report's `job_dir`, written below as `jobs/<slug>`.
 
 ```
 idea / photo / text  →  model.py (Blender)  →  mesh  →  DFM + printability

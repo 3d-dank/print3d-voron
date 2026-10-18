@@ -24,7 +24,7 @@ def studio_conf_mtime() -> float | None:
 
 
 def main() -> int:
-    profiles = ROOT / "profiles" / "x2d-0.4"
+    profiles = ROOT / "src" / "print3d" / "profiles" / "x2d-0.4"
     fixtures = ROOT / "tests" / "fixtures"
     scratch = ROOT / "scratch" / "spike"
     mesh = fixtures / "cube_20mm.stl"

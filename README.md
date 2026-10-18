@@ -17,24 +17,31 @@ Nothing here talks to the printer.
 
 ## Install
 
-Needs [Blender](https://www.blender.org/download/) 4.2+ and
-[Bambu Studio](https://bambulab.com/en/download/studio).
+Needs [Blender](https://www.blender.org/download/) 4.2+,
+[Bambu Studio](https://bambulab.com/en/download/studio) and
+[uv](https://docs.astral.sh/uv/).
 
 ```bash
-git clone git@github.com:mfranzon/print3d.git
-cd print3d
-python3 -m venv .venv
-.venv/bin/pip install -e '.[dev]'
-.venv/bin/print3d status
+uv tool install git+https://github.com/mfranzon/print3d
+print3d setup
 ```
 
-`status` shows where Blender and Studio were found. On macOS this is automatic;
-otherwise set `BLENDER_BIN` and `BAMBU_STUDIO_BIN`.
+`setup` finds Claude Code, Codex, Cursor and Gemini CLI on this machine, shows
+what it will change, and on your yes registers the print3d MCP server with each
+(Claude Code also gets the `/print3d` skill). Edited config files are backed up
+beside themselves. Restart your agent afterwards. `--dry-run` shows the plan
+without changing anything; `--agent codex` limits it to one agent.
+
+`print3d status` shows where Blender and Studio were found. On macOS this is
+automatic; otherwise set `BLENDER_BIN` and `BAMBU_STUDIO_BIN`. Jobs go to
+`~/print3d/jobs`, or `$PRINT3D_JOBS`.
+
+To update, run `uv tool upgrade print3d`, then `print3d setup` again.
 
 ## Use
 
 ```bash
-.venv/bin/print3d make "a 40mm nameplate that says MARCO" --script examples/nameplate.py
+print3d make "a 40mm nameplate that says MARCO" --script examples/nameplate.py
 ```
 
 This models, checks, slices and prints a JSON report. It exits 1 if any check
@@ -56,7 +63,9 @@ Other commands:
 | `measure <slug> ...` | Record scale, dimensions, outlines and unknowns in `spec.json` |
 | `likeness <slug>` | Compare the mesh with the photographed outlines |
 | `plan model.stl out.gcode.3mf` | Show the Studio command without running it |
-| `flatten` | Rebuild the X2D presets in `profiles/x2d-0.4/` |
+| `flatten` | Rebuild the X2D presets in `src/print3d/profiles/x2d-0.4/` |
+| `setup` | Register print3d with your agents |
+| `mcp` | Run the MCP server on stdio (agents launch this) |
 
 ## Writing a model script
 
@@ -70,7 +79,7 @@ Plain bpy that builds geometry. `examples/nameplate.py` is the reference.
 - Orientation is up to you. Studio's auto-orient is off, so the part prints the
   way you model it.
 
-More recipes and gotchas: `skill/references/modelling.md`.
+More recipes and gotchas: `src/print3d/skill/references/modelling.md`.
 
 ## From a photo
 
@@ -97,7 +106,7 @@ is wrong, or the part is turned or mirrored, the run fails just like it does for
 an overhang. `jobs/<slug>/likeness/<view>.png` shows the difference: red is in
 the photo but missing from the model, blue is in the model but not in the photo.
 
-The full workflow is in `skill/references/from-photo.md`.
+The full workflow is in `src/print3d/skill/references/from-photo.md`.
 
 ## What gets checked
 
@@ -111,20 +120,28 @@ The full workflow is in `skill/references/from-photo.md`.
 Every problem comes with a `fix` telling you what to change in the script.
 `jobs/<slug>/history.jsonl` keeps a record of each run.
 
-## The /print3d skill
+## Use it from your agent
 
-`skill/` is a Claude Code skill that runs the whole loop for you. Install it:
+After `print3d setup`, ask your agent for a part. In Claude Code:
 
-```bash
-ln -sfn "$(pwd)/skill" ~/.claude/skills/print3d
+```text
+/print3d a 40mm nameplate that says MARCO
+/print3d recreate the knob in ~/Desktop/knob.jpg, it sits on a 6 mm D-shaft
 ```
 
-Then type `/print3d a 40mm nameplate that says MARCO`, or
-`/print3d recreate this knob ~/Desktop/knob.jpg`.
+Codex, Cursor and Gemini get the same steps through MCP: `guide`, `make`,
+`grid`, `measure_*`, `likeness` and `check`. Tools that make pictures (the
+coordinate grid, the plate preview, the likeness overlays) return them as
+images, so the agent sees what it built.
 
-## Tests
+## Develop
 
 ```bash
-.venv/bin/python -m pytest -q                      # unit tests
+git clone git@github.com:mfranzon/print3d.git && cd print3d
+uv venv && uv pip install -e '.[dev]'
+.venv/bin/print3d setup                             # point your agents at this checkout
+.venv/bin/python -m pytest -q                       # unit tests
 PRINT3D_STUDIO_IT=1 .venv/bin/python -m pytest -q   # also runs Blender and Studio
 ```
+
+In a checkout, jobs go to `jobs/` in the repo.

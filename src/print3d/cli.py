@@ -9,9 +9,10 @@ from pathlib import Path
 
 from print3d.blender import BlenderError, find_blender, run_model_script
 from print3d.brief import parse_brief
+from print3d import setup as installer
 from print3d import spec as specs
 from print3d.flatten import flatten_x2d
-from print3d.likeness import check_likeness, likeness_advice
+from print3d.likeness import check_job
 from print3d.paths import default_jobs_dir, default_profiles_dir
 from print3d.photo import grid
 from print3d.pipeline import _model_params, run_job
@@ -76,9 +77,7 @@ def cmd_grid(args: argparse.Namespace) -> int:
     crop = tuple(float(v) for v in args.crop.split(",")) if args.crop else None
     if crop is not None and len(crop) != 4:
         raise ValueError("--crop is x0,y0,x1,y1")
-    suffix = "_" + "_".join(str(int(v)) for v in crop) if crop else ""
-    out = Path(args.out) if args.out else default_jobs_dir() / "grid" / f"{photo.stem}{suffix}.png"
-    _print_json(grid(photo, out, crop=crop, step=args.step))
+    _print_json(grid(photo, Path(args.out) if args.out else None, crop=crop, step=args.step))
     return 0
 
 
@@ -110,14 +109,46 @@ def cmd_measure(args: argparse.Namespace) -> int:
 
 
 def cmd_likeness(args: argparse.Namespace) -> int:
-    job_dir = default_jobs_dir() / args.slug
-    mesh = Path(args.mesh) if args.mesh else job_dir / "mesh" / f"{args.slug}.stl"
-    results = check_likeness(mesh, specs.load_spec(job_dir), job_dir / "likeness")
-    if not results:
-        raise ValueError(f"No view in {specs.spec_path(job_dir)} has an outline yet.")
-    notes = likeness_advice(results)
+    results, notes = check_job(default_jobs_dir() / args.slug, Path(args.mesh) if args.mesh else None)
     _print_json({"likeness": results, "advice": [note.as_dict() for note in notes]})
     return 1 if any(note.severity == "error" for note in notes) else 0
+
+
+def cmd_mcp(_args: argparse.Namespace) -> int:
+    from print3d.mcp_server import main as serve
+
+    serve()
+    return 0
+
+
+def cmd_setup(args: argparse.Namespace) -> int:
+    changes = installer.plan(args.agent)
+    if not changes:
+        print(f"No agent found. Name one with --agent ({', '.join(installer.AGENTS)}).")
+        return 1
+    print("print3d setup will:")
+    for change in changes:
+        print("  " + change.describe())
+    print(f"MCP server command: {' '.join(installer.server_command())}")
+    if args.dry_run:
+        return 0
+    if not args.yes:
+        if not sys.stdin.isatty():
+            print("Run again with --yes to apply.")
+            return 1
+        if input("Apply? [y/N] ").strip().lower() not in ("y", "yes"):
+            return 1
+    failed = False
+    for change in changes:
+        try:
+            change.apply()
+            print(f"  done  {change.describe()}")
+        except installer.SetupError as exc:
+            failed = True
+            print(f"  FAIL  {change.describe()}\n        {exc}")
+    print("Restart your agent, then ask it to make something, e.g. "
+          '"recreate the knob in ~/Desktop/knob.jpg".')
+    return 1 if failed else 0
 
 
 def cmd_flatten(args: argparse.Namespace) -> int:
@@ -235,6 +266,16 @@ def build_parser() -> argparse.ArgumentParser:
     likeness_cmd.add_argument("slug")
     likeness_cmd.add_argument("--mesh", help="Default: jobs/<slug>/mesh/<slug>.stl")
     likeness_cmd.set_defaults(func=cmd_likeness)
+
+    mcp_cmd = sub.add_parser("mcp", help="Run the MCP server on stdio")
+    mcp_cmd.set_defaults(func=cmd_mcp)
+
+    setup_cmd = sub.add_parser("setup", help="Register print3d with Claude Code, Codex, Cursor and Gemini")
+    setup_cmd.add_argument("--agent", action="append", choices=installer.AGENTS,
+                           help="Only this agent (repeatable). Default: every one found")
+    setup_cmd.add_argument("--dry-run", action="store_true", help="Show the plan and change nothing")
+    setup_cmd.add_argument("--yes", action="store_true", help="Apply without asking")
+    setup_cmd.set_defaults(func=cmd_setup)
 
     flatten_cmd = sub.add_parser("flatten", help="Rebuild pinned X2D Studio profiles")
     flatten_cmd.add_argument("--output")

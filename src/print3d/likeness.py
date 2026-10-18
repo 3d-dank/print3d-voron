@@ -28,7 +28,7 @@ from PIL import Image, ImageChops, ImageDraw
 from print3d.dfm import read_stl
 from print3d.photo import open_upright, view_mask
 from print3d.printability import Advice
-from print3d.spec import PICK_ERROR_PX
+from print3d.spec import PICK_ERROR_PX, load_spec, spec_path
 
 IOU_WARN = 0.90
 IOU_ERROR = 0.80
@@ -209,6 +209,15 @@ def check_likeness(mesh: Path, spec: dict[str, Any], out_dir: Path) -> list[dict
         return []
     triangles = read_stl(mesh.expanduser().resolve())
     return [compare_view(triangles, name, view, out_dir) for name, view in views.items()]
+
+
+def check_job(job_dir: Path, mesh: Path | None = None) -> tuple[list[dict[str, Any]], list[Advice]]:
+    """The likeness check on a job's last mesh, outside a full run."""
+    mesh = mesh or job_dir / "mesh" / f"{job_dir.name}.stl"
+    results = check_likeness(mesh, load_spec(job_dir), job_dir / "likeness")
+    if not results:
+        raise ValueError(f"No view in {spec_path(job_dir)} has an outline yet.")
+    return results, likeness_advice(results)
 
 
 def likeness_advice(results: list[dict[str, Any]]) -> list[Advice]:
