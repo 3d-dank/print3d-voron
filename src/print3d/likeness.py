@@ -23,7 +23,7 @@ import math
 from pathlib import Path
 from typing import Any
 
-from PIL import Image, ImageChops, ImageDraw
+from PIL import Image, ImageChops, ImageDraw, ImageFilter
 
 from print3d.dfm import read_stl
 from print3d.photo import open_upright, view_mask
@@ -189,15 +189,26 @@ def compare_view(triangles, name: str, view: dict[str, Any], out_dir: Path) -> d
 
 
 def _draw_overlay(photo: Path, region, side: int, photo_mask, model_mask, out: Path) -> None:
-    """Red: in the photo, missing from the model. Blue: in the model, not in the photo."""
-    base = open_upright(photo).crop(region).resize((side, side), Image.LANCZOS)
+    """Red: in the photo, missing from the model. Blue: in the model, not in the photo.
+
+    The model's outline is drawn in blue as well, so a good match still shows where it sits.
+    """
+    photo_image = open_upright(photo)
+    # The region can run past the photo's edges; past them is background, not black.
+    canvas = Image.new("RGB", (region[2] - region[0], region[3] - region[1]), "white")
+    canvas.paste(photo_image, (-region[0], -region[1]))
+    base = canvas.resize((side, side), Image.LANCZOS)
     only_photo = ImageChops.logical_and(photo_mask, ImageChops.logical_xor(photo_mask, model_mask))
     only_model = ImageChops.logical_and(model_mask, ImageChops.logical_xor(photo_mask, model_mask))
     for mask, colour in ((only_photo, (230, 40, 40)), (only_model, (40, 90, 230))):
         tinted = Image.blend(base, Image.new("RGB", base.size, colour), 0.55)
         base = Image.composite(tinted, base, mask)
     if side < WORK_PX:
-        base = base.resize((WORK_PX, WORK_PX), Image.NEAREST)
+        base = base.resize((WORK_PX, WORK_PX), Image.LANCZOS)
+        model_mask = model_mask.resize((WORK_PX, WORK_PX), Image.NEAREST)
+    filled = model_mask.convert("L")
+    edge = ImageChops.subtract(filled, filled.filter(ImageFilter.MinFilter(5)))
+    base.paste((40, 90, 230), mask=edge)
     out.parent.mkdir(parents=True, exist_ok=True)
     base.save(out)
 

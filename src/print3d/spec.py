@@ -18,6 +18,8 @@ import math
 from pathlib import Path
 from typing import Any
 
+from print3d.photo import rectify
+
 SPEC = "spec.json"
 
 # Objects people photograph next to a part, by the length the points span.
@@ -139,6 +141,39 @@ def set_scale(
             "assumes": "The reference lies in the same plane as what is measured, "
             "and the photo is taken square-on from a distance.",
         }
+    )
+    return entry
+
+
+def rectify_view(
+    spec: dict[str, Any],
+    view: str,
+    photo: Path,
+    corners: list[list[float]],
+    size_mm: tuple[float, float],
+    out: Path,
+    *,
+    look: str | None = None,
+    up: str | None = None,
+) -> dict[str, Any]:
+    """Scale a view from a flat face of known size, seen at an angle.
+
+    The view's photo becomes the rectified image: every later point for this view
+    is read off that image, where the face is square-on.
+    """
+    warped = rectify(photo, [tuple(c) for c in corners], size_mm, out)
+    (x0, y0), (x1, _), *_ = warped["face_px"]
+    entry = set_scale(spec, view, out, str(size_mm[0]), [[x0, y0], [x1, y0]], look=look, up=up)
+    # Picking error lives in the original photo, where the face was smaller.
+    entry["scale"]["ref_px"] = round(warped["shortest_edge_photo_px"], 2)
+    entry["rectified"] = {
+        "from_photo": str(photo.expanduser().resolve()),
+        "corners": corners,
+        "size_mm": list(size_mm),
+    }
+    entry["assumes"] = (
+        "What is measured lies in the rectified face. Anything standing off it, "
+        "like a boss or a stud, shifts with the viewing angle."
     )
     return entry
 

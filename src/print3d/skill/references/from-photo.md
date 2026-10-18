@@ -25,6 +25,23 @@ Read every point off a **crop**. At full size a pixel guess is millimetres
 wrong; the crop's labels are photo pixels, so what you read goes straight into
 `--points`.
 
+**Taken at an angle** (most photos are): rectify instead. Pick the four corners
+of a flat face of known size, in the order they should appear square-on
+(top-left, top-right, bottom-right, bottom-left):
+
+```bash
+print3d meet x1,y1,x2,y2 x3,y3,x4,y4                  # a corner hidden behind something
+print3d measure <slug> rectify top photo.jpg --corners x,y,x,y,x,y,x,y --size 31.8,15.8
+print3d grid jobs/<slug>/views/top.png --crop ...     # read every later point off this
+```
+
+For a hidden corner, find two points on each edge that meets there and let
+`meet` cross them; on a plain background, the lowest points of the outline
+between bumps are where an edge shows through. Only what lies in the rectified
+face measures true: anything standing off it, like a stud or a boss, smears
+with the viewing angle. Measure such features where they meet the face, and
+derive the rest from symmetry or record it as assumed.
+
 View names `front back left right top bottom` set the camera axes in the part
 **as printed** (z up off the bed). When the part prints in another pose, such
 as a bracket laid on its side, pass `--look` and `--up` in the printed frame.

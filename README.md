@@ -60,7 +60,8 @@ Other commands:
 | `check model.stl` | Printability checks only |
 | `inspect job.gcode.3mf` | Time, filament and layers of a sliced job |
 | `grid photo.jpg` | Pixel coordinates over a photo, or a zoomed `--crop` |
-| `measure <slug> ...` | Record scale, dimensions, outlines and unknowns in `spec.json` |
+| `measure <slug> ...` | Record scale (or `rectify` an angled face), dimensions, outlines and unknowns in `spec.json` |
+| `meet edge edge` | The corner where two edges cross, when it is hidden |
 | `likeness <slug>` | Compare the mesh with the photographed outlines |
 | `plan model.stl out.gcode.3mf` | Show the Studio command without running it |
 | `flatten` | Rebuild the X2D presets in `src/print3d/profiles/x2d-0.4/` |
@@ -106,7 +107,50 @@ is wrong, or the part is turned or mirrored, the run fails just like it does for
 an overhang. `jobs/<slug>/likeness/<view>.png` shows the difference: red is in
 the photo but missing from the model, blue is in the model but not in the photo.
 
+Most photos are taken at an angle. `measure rectify` takes the four corners of
+a flat face of known size (the object's own top, a card it lies on) and warps
+the photo so that face is seen square-on; every later point for that view is
+read off the rectified image. When a corner hides behind something, `print3d meet`
+finds it where its two edges cross.
+
 The full workflow is in `src/print3d/skill/references/from-photo.md`.
+
+### Benchmark: a LEGO brick from a web photo
+
+![A three-quarter photo of a LEGO 2x4 brick, its top face rectified with the model's outline in blue, and the sliced model](docs/lego-benchmark.jpg)
+
+A three-quarter photo off Wikimedia Commons, no scale reference in it. The top
+face is rectified from the brick's 31.8 x 15.8 mm footprint; its back-right
+corner is hidden behind a stud and found from its two edges. The studs are then
+measured where their bases meet the face, and scored against LEGO's published
+dimensions:
+
+| | from the photo | LEGO | error |
+| --- | --- | --- | --- |
+| stud pitch, along | 8.02 ± 0.22 mm | 8.0 mm | 0.02 mm |
+| stud pitch, across | 8.05 ± 0.36 mm | 8.0 mm | 0.05 mm |
+| stud to edge | 1.45 ± 0.24 mm | 1.5 mm | 0.05 mm |
+| stud diameter (from the three above) | 4.85 mm | 4.8 mm | 0.05 mm |
+
+The brick built from those numbers (`examples/lego_2x4.py`) covers the photo's
+top face at 99% and slices clean: 57 layers, 12 minutes, 2.8 g.
+
+What the photo cannot give is recorded as such: the height is given (9.6 mm),
+and the stud height is assumed, because a stud stands off the rectified face
+and smears with the viewing angle (read straight off the image, a stud looks
+7.3 mm wide). One reading went wrong: stud-to-edge measured from the front edge
+came out at 1.95 mm, where the base's shadow fades. It is left out of the
+table's inputs, which is the call the tolerance cannot make for you.
+
+Replay it with `pytest tests/test_lego_benchmark.py`; the end-to-end Blender and
+Studio run is in `tests/test_studio_it.py`. Whether the printed studs grip a
+real brick is the next test, and a printer's.
+
+Photo: "Light Green Lego Brick" by Stilfehler,
+[CC BY-SA 3.0](https://creativecommons.org/licenses/by-sa/3.0/), via
+[Wikimedia Commons](https://commons.wikimedia.org/wiki/File:Light_Green_Lego_Brick.jpg);
+the figure above is shared under the same licence. LEGO is a trademark of the
+LEGO Group, which does not sponsor or endorse this project.
 
 ## What gets checked
 

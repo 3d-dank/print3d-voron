@@ -14,7 +14,7 @@ from print3d import spec as specs
 from print3d.flatten import flatten_x2d
 from print3d.likeness import check_job
 from print3d.paths import default_jobs_dir, default_profiles_dir
-from print3d.photo import grid
+from print3d.photo import grid, meet
 from print3d.pipeline import _model_params, run_job
 from print3d.printability import advise, analyze_mesh, analyze_slice
 from print3d.project import inspect_project
@@ -89,6 +89,12 @@ def cmd_measure(args: argparse.Namespace) -> int:
             spec, args.view, Path(args.photo), args.ref, specs.parse_points(args.points, count=2),
             look=args.look, up=args.up,
         )
+    elif args.action == "rectify":
+        width, height = (float(v) for v in args.size.split(","))
+        result = specs.rectify_view(
+            spec, args.view, Path(args.photo), specs.parse_points(args.corners, count=4),
+            (width, height), job_dir / "views" / f"{args.view}.png", look=args.look, up=args.up,
+        )
     elif args.action == "dim" and args.mm is not None:
         result = specs.given_dim(spec, args.name, args.mm, args.source, args.why)
     elif args.action == "dim":
@@ -105,6 +111,13 @@ def cmd_measure(args: argparse.Namespace) -> int:
     if args.action != "show":
         result = {"saved": str(specs.save_spec(job_dir, spec)), "entry": result}
     _print_json(result)
+    return 0
+
+
+def cmd_meet(args: argparse.Namespace) -> int:
+    a1, a2 = specs.parse_points(args.edge_a, count=2)
+    b1, b2 = specs.parse_points(args.edge_b, count=2)
+    _print_json({"corner": list(meet(a1, a2, b1, b2))})
     return 0
 
 
@@ -247,6 +260,14 @@ def build_parser() -> argparse.ArgumentParser:
     scale.add_argument("--points", required=True, help="x1,y1,x2,y2: the two ends of the reference")
     scale.add_argument("--look", choices=specs.AXES, help="Axis the camera looks along, in the printed part")
     scale.add_argument("--up", choices=specs.AXES, help="Axis pointing up in the photo, in the printed part")
+    rectify = actions.add_parser("rectify", help="Scale a view from a flat face of known size seen at an angle")
+    rectify.add_argument("view")
+    rectify.add_argument("photo")
+    rectify.add_argument("--corners", required=True,
+                         help="x,y x4: the face's top-left, top-right, bottom-right, bottom-left as it should appear")
+    rectify.add_argument("--size", required=True, help="W,H of the face in mm")
+    rectify.add_argument("--look", choices=specs.AXES)
+    rectify.add_argument("--up", choices=specs.AXES)
     dim = actions.add_parser("dim", help="Measure a dimension off a photo, or type one in")
     dim.add_argument("name")
     dim.add_argument("--view")
@@ -261,6 +282,11 @@ def build_parser() -> argparse.ArgumentParser:
     unknown = actions.add_parser("unknown", help="Record something no photo shows")
     unknown.add_argument("text")
     actions.add_parser("show", help="Print the spec")
+
+    meet_cmd = sub.add_parser("meet", help="Where two edges cross: a corner hidden behind something")
+    meet_cmd.add_argument("edge_a", help="x1,y1,x2,y2: two points on one edge")
+    meet_cmd.add_argument("edge_b", help="x1,y1,x2,y2: two points on the other edge")
+    meet_cmd.set_defaults(func=cmd_meet)
 
     likeness_cmd = sub.add_parser("likeness", help="Compare the mesh with the photographed outlines")
     likeness_cmd.add_argument("slug")

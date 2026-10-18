@@ -19,6 +19,7 @@ from print3d import spec as specs
 from print3d.likeness import check_job
 from print3d.paths import default_jobs_dir, skill_dir
 from print3d.photo import grid as draw_grid
+from print3d.photo import meet as cross
 from print3d.pipeline import run_job
 from print3d.printability import advise, analyze_mesh, analyze_slice
 
@@ -135,6 +136,34 @@ def measure_scale(
     spec = specs.load_spec(_job(slug))
     entry = specs.set_scale(spec, view, Path(photo), ref, points, look=look, up=up)
     return _saved(slug, spec, entry)
+
+
+@tool(images=True)
+def measure_rectify(
+    slug: str,
+    view: str,
+    photo: str,
+    corners: list[list[float]],
+    size_mm: list[float],
+    look: str | None = None,
+    up: str | None = None,
+) -> list[Any]:
+    """Scale a view from a flat face of known size [W, H] seen at an angle.
+
+    `corners` are the face's top-left, top-right, bottom-right, bottom-left as it
+    should appear square-on. Returns the rectified image: read every later point
+    for this view off it.
+    """
+    spec = specs.load_spec(_job(slug))
+    out = _job(slug) / "views" / f"{view}.png"
+    entry = specs.rectify_view(spec, view, Path(photo), corners, (size_mm[0], size_mm[1]), out, look=look, up=up)
+    return _with_images(json.loads(_saved(slug, spec, entry)), [str(out)])
+
+
+@tool()
+def meet(edge_a: list[list[float]], edge_b: list[list[float]]) -> str:
+    """Where two edges cross, each given as two points: a corner hidden behind something."""
+    return _json({"corner": list(cross(*edge_a, *edge_b))})
 
 
 @tool()
