@@ -9,8 +9,12 @@ from pathlib import Path
 
 from print3d.blender import BlenderError, find_blender, run_model_script
 from print3d.brief import parse_brief
+from print3d import setup as installer
+from print3d import spec as specs
 from print3d.flatten import flatten_x2d
-from print3d.paths import default_profiles_dir
+from print3d.likeness import check_job
+from print3d.paths import default_jobs_dir, default_profiles_dir
+from print3d.photo import grid, meet
 from print3d.pipeline import _model_params, run_job
 from print3d.printability import advise, analyze_mesh, analyze_slice
 from print3d.project import inspect_project
@@ -66,6 +70,98 @@ def cmd_check(args: argparse.Namespace) -> int:
 def cmd_inspect(args: argparse.Namespace) -> int:
     _print_json(inspect_project(Path(args.project)))
     return 0
+
+
+def cmd_grid(args: argparse.Namespace) -> int:
+    photo = Path(args.photo)
+    crop = tuple(float(v) for v in args.crop.split(",")) if args.crop else None
+    if crop is not None and len(crop) != 4:
+        raise ValueError("--crop is x0,y0,x1,y1")
+    _print_json(grid(photo, Path(args.out) if args.out else None, crop=crop, step=args.step))
+    return 0
+
+
+def cmd_measure(args: argparse.Namespace) -> int:
+    job_dir = default_jobs_dir() / args.slug
+    spec = specs.load_spec(job_dir)
+    if args.action == "scale":
+        result = specs.set_scale(
+            spec, args.view, Path(args.photo), args.ref, specs.parse_points(args.points, count=2),
+            look=args.look, up=args.up,
+        )
+    elif args.action == "rectify":
+        width, height = (float(v) for v in args.size.split(","))
+        result = specs.rectify_view(
+            spec, args.view, Path(args.photo), specs.parse_points(args.corners, count=4),
+            (width, height), job_dir / "views" / f"{args.view}.png", look=args.look, up=args.up,
+        )
+    elif args.action == "dim" and args.mm is not None:
+        result = specs.given_dim(spec, args.name, args.mm, args.source, args.why)
+    elif args.action == "dim":
+        if not (args.view and args.points):
+            raise ValueError("Give --view and --points to measure, or --mm and --source to type it in.")
+        result = specs.measure_dim(spec, args.name, args.view, specs.parse_points(args.points, count=2))
+    elif args.action == "outline":
+        points = specs.parse_points(args.points) if args.points else None
+        result = specs.set_outline(spec, args.view, points=points, mask=Path(args.mask) if args.mask else None)
+    elif args.action == "unknown":
+        result = specs.add_unknown(spec, args.text)
+    else:
+        result = spec
+    if args.action != "show":
+        result = {"saved": str(specs.save_spec(job_dir, spec)), "entry": result}
+    _print_json(result)
+    return 0
+
+
+def cmd_meet(args: argparse.Namespace) -> int:
+    a1, a2 = specs.parse_points(args.edge_a, count=2)
+    b1, b2 = specs.parse_points(args.edge_b, count=2)
+    _print_json({"corner": list(meet(a1, a2, b1, b2))})
+    return 0
+
+
+def cmd_likeness(args: argparse.Namespace) -> int:
+    results, notes = check_job(default_jobs_dir() / args.slug, Path(args.mesh) if args.mesh else None)
+    _print_json({"likeness": results, "advice": [note.as_dict() for note in notes]})
+    return 1 if any(note.severity == "error" for note in notes) else 0
+
+
+def cmd_mcp(_args: argparse.Namespace) -> int:
+    from print3d.mcp_server import main as serve
+
+    serve()
+    return 0
+
+
+def cmd_setup(args: argparse.Namespace) -> int:
+    changes = installer.plan(args.agent)
+    if not changes:
+        print(f"No agent found. Name one with --agent ({', '.join(installer.AGENTS)}).")
+        return 1
+    print("print3d setup will:")
+    for change in changes:
+        print("  " + change.describe())
+    print(f"MCP server command: {' '.join(installer.server_command())}")
+    if args.dry_run:
+        return 0
+    if not args.yes:
+        if not sys.stdin.isatty():
+            print("Run again with --yes to apply.")
+            return 1
+        if input("Apply? [y/N] ").strip().lower() not in ("y", "yes"):
+            return 1
+    failed = False
+    for change in changes:
+        try:
+            change.apply()
+            print(f"  done  {change.describe()}")
+        except installer.SetupError as exc:
+            failed = True
+            print(f"  FAIL  {change.describe()}\n        {exc}")
+    print("Restart your agent, then ask it to make something, e.g. "
+          '"recreate the knob in ~/Desktop/knob.jpg".')
+    return 1 if failed else 0
 
 
 def cmd_flatten(args: argparse.Namespace) -> int:
@@ -145,6 +241,67 @@ def build_parser() -> argparse.ArgumentParser:
     inspect_cmd = sub.add_parser("inspect", help="Read a sliced .gcode.3mf")
     inspect_cmd.add_argument("project")
     inspect_cmd.set_defaults(func=cmd_inspect)
+
+    grid_cmd = sub.add_parser("grid", help="Draw pixel coordinates over a photo to read points off")
+    grid_cmd.add_argument("photo")
+    grid_cmd.add_argument("--crop", help="x0,y0,x1,y1 in photo pixels: zoom into a feature")
+    grid_cmd.add_argument("--step", type=int, help="Grid spacing in photo pixels")
+    grid_cmd.add_argument("--out")
+    grid_cmd.set_defaults(func=cmd_grid)
+
+    measure_cmd = sub.add_parser("measure", help="Record dimensions and their evidence in jobs/<slug>/spec.json")
+    measure_cmd.add_argument("slug")
+    measure_cmd.set_defaults(func=cmd_measure)
+    actions = measure_cmd.add_subparsers(dest="action", required=True)
+    scale = actions.add_parser("scale", help="Scale a photo from a reference object in it")
+    scale.add_argument("view", help="front, back, left, right, top, bottom, or your own name")
+    scale.add_argument("photo")
+    scale.add_argument("--ref", required=True, help=f"mm, or one of: {', '.join(specs.REFERENCES_MM)}")
+    scale.add_argument("--points", required=True, help="x1,y1,x2,y2: the two ends of the reference")
+    scale.add_argument("--look", choices=specs.AXES, help="Axis the camera looks along, in the printed part")
+    scale.add_argument("--up", choices=specs.AXES, help="Axis pointing up in the photo, in the printed part")
+    rectify = actions.add_parser("rectify", help="Scale a view from a flat face of known size seen at an angle")
+    rectify.add_argument("view")
+    rectify.add_argument("photo")
+    rectify.add_argument("--corners", required=True,
+                         help="x,y x4: the face's top-left, top-right, bottom-right, bottom-left as it should appear")
+    rectify.add_argument("--size", required=True, help="W,H of the face in mm")
+    rectify.add_argument("--look", choices=specs.AXES)
+    rectify.add_argument("--up", choices=specs.AXES)
+    dim = actions.add_parser("dim", help="Measure a dimension off a photo, or type one in")
+    dim.add_argument("name")
+    dim.add_argument("--view")
+    dim.add_argument("--points", help="x1,y1,x2,y2: the two ends of the feature")
+    dim.add_argument("--mm", type=float)
+    dim.add_argument("--source", choices=("user", "assumed"))
+    dim.add_argument("--why")
+    outline = actions.add_parser("outline", help="The object's outline in a view, for the likeness check")
+    outline.add_argument("view")
+    outline.add_argument("--points", help="x,y,x,y,...: polygon around the object")
+    outline.add_argument("--mask", help="PNG the size of the photo: object white or opaque")
+    unknown = actions.add_parser("unknown", help="Record something no photo shows")
+    unknown.add_argument("text")
+    actions.add_parser("show", help="Print the spec")
+
+    meet_cmd = sub.add_parser("meet", help="Where two edges cross: a corner hidden behind something")
+    meet_cmd.add_argument("edge_a", help="x1,y1,x2,y2: two points on one edge")
+    meet_cmd.add_argument("edge_b", help="x1,y1,x2,y2: two points on the other edge")
+    meet_cmd.set_defaults(func=cmd_meet)
+
+    likeness_cmd = sub.add_parser("likeness", help="Compare the mesh with the photographed outlines")
+    likeness_cmd.add_argument("slug")
+    likeness_cmd.add_argument("--mesh", help="Default: jobs/<slug>/mesh/<slug>.stl")
+    likeness_cmd.set_defaults(func=cmd_likeness)
+
+    mcp_cmd = sub.add_parser("mcp", help="Run the MCP server on stdio")
+    mcp_cmd.set_defaults(func=cmd_mcp)
+
+    setup_cmd = sub.add_parser("setup", help="Register print3d with Claude Code, Codex, Cursor and Gemini")
+    setup_cmd.add_argument("--agent", action="append", choices=installer.AGENTS,
+                           help="Only this agent (repeatable). Default: every one found")
+    setup_cmd.add_argument("--dry-run", action="store_true", help="Show the plan and change nothing")
+    setup_cmd.add_argument("--yes", action="store_true", help="Apply without asking")
+    setup_cmd.set_defaults(func=cmd_setup)
 
     flatten_cmd = sub.add_parser("flatten", help="Rebuild pinned X2D Studio profiles")
     flatten_cmd.add_argument("--output")
