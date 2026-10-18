@@ -1,0 +1,209 @@
+"""What we know about the object, and how we know it.
+
+`jobs/<slug>/spec.json` is the evidence behind a model built from photos. Every
+dimension carries its source - measured off a photo, given by the user, or
+assumed - and a measured one keeps the pixels and the scale reference it came
+from, so a wrong number can be traced back and re-measured instead of argued.
+
+    views:     per photo: the file, its scale reference, the camera axes, and
+               optionally the object's outline for the likeness check
+    dims:      name -> mm, source, tolerance, evidence
+    unknowns:  what no photo shows
+"""
+
+from __future__ import annotations
+
+import json
+import math
+from pathlib import Path
+from typing import Any
+
+SPEC = "spec.json"
+
+# Objects people photograph next to a part, by the length the points span.
+REFERENCES_MM = {
+    "card": 85.6,  # ISO/IEC 7810 ID-1: bank card, ID card, long edge
+    "card-short": 53.98,
+    "a4": 297.0,
+    "a4-short": 210.0,
+    "letter": 279.4,
+    "letter-short": 215.9,
+    "euro-1": 23.25,
+    "euro-2": 25.75,
+    "euro-0.50": 24.25,
+    "us-quarter": 24.26,
+    "us-penny": 19.05,
+    "uk-pound": 23.43,
+}
+
+# How far off a picked point can be, in photo pixels, when read off a grid crop.
+PICK_ERROR_PX = 3.0
+
+# Default camera axes per view name, in the printed part's frame (z up off the bed).
+# `look` is the direction the camera looks along; `up` is up in the photo.
+VIEW_AXES = {
+    "front": ("+y", "+z"),
+    "back": ("-y", "+z"),
+    "left": ("+x", "+z"),
+    "right": ("-x", "+z"),
+    "top": ("-z", "+y"),
+    "bottom": ("+z", "-y"),
+}
+AXES = ("+x", "-x", "+y", "-y", "+z", "-z")
+
+
+class SpecError(ValueError):
+    """Raised for a spec edit that cannot be honoured."""
+
+
+def spec_path(job_dir: Path) -> Path:
+    return job_dir / SPEC
+
+
+def load_spec(job_dir: Path) -> dict[str, Any]:
+    path = spec_path(job_dir)
+    if path.is_file():
+        return json.loads(path.read_text(encoding="utf-8"))
+    return {"views": {}, "dims": {}, "unknowns": []}
+
+
+def save_spec(job_dir: Path, spec: dict[str, Any]) -> Path:
+    job_dir.mkdir(parents=True, exist_ok=True)
+    path = spec_path(job_dir)
+    path.write_text(json.dumps(spec, indent=2) + "\n", encoding="utf-8")
+    return path
+
+
+def parse_points(text: str, *, count: int | None = None) -> list[list[float]]:
+    """`"x1,y1,x2,y2,..."` -> `[[x1, y1], [x2, y2], ...]`."""
+    try:
+        values = [float(v) for v in text.replace(" ", "").split(",") if v]
+    except ValueError as exc:
+        raise SpecError(f"Points must be numbers: {text!r}") from exc
+    if len(values) % 2:
+        raise SpecError(f"Points come in x,y pairs; got {len(values)} numbers.")
+    points = [values[i : i + 2] for i in range(0, len(values), 2)]
+    if count is not None and len(points) != count:
+        raise SpecError(f"Expected {count} points, got {len(points)}.")
+    return points
+
+
+def _span(points: list[list[float]]) -> float:
+    (x1, y1), (x2, y2) = points
+    return math.hypot(x2 - x1, y2 - y1)
+
+
+def reference_mm(ref: str) -> float:
+    if ref in REFERENCES_MM:
+        return REFERENCES_MM[ref]
+    try:
+        return float(ref)
+    except ValueError:
+        known = ", ".join(sorted(REFERENCES_MM))
+        raise SpecError(f"Unknown reference {ref!r}. Use a length in mm or one of: {known}.") from None
+
+
+def set_scale(
+    spec: dict[str, Any],
+    view: str,
+    photo: Path,
+    ref: str,
+    points: list[list[float]],
+    *,
+    look: str | None = None,
+    up: str | None = None,
+) -> dict[str, Any]:
+    ref_px = _span(points)
+    if ref_px < 1.0:
+        raise SpecError("The reference points coincide.")
+    default_look, default_up = VIEW_AXES.get(view, (None, None))
+    look, up = look or default_look, up or default_up
+    if look is None or up is None:
+        raise SpecError(f"View {view!r} is not one of {', '.join(VIEW_AXES)}; pass --look and --up.")
+    if look not in AXES or up not in AXES or look[1] == up[1]:
+        raise SpecError(f"--look and --up must be two different axes from {', '.join(AXES)}.")
+    ref_len = reference_mm(ref)
+    entry = spec["views"].setdefault(view, {})
+    entry.update(
+        {
+            "photo": str(photo.expanduser().resolve()),
+            "look": look,
+            "up": up,
+            "scale": {
+                "ref": ref,
+                "ref_mm": ref_len,
+                "points": points,
+                "ref_px": round(ref_px, 2),
+                "mm_per_px": ref_len / ref_px,
+            },
+            "assumes": "The reference lies in the same plane as what is measured, "
+            "and the photo is taken square-on from a distance.",
+        }
+    )
+    return entry
+
+
+def _view(spec: dict[str, Any], view: str) -> dict[str, Any]:
+    entry = spec["views"].get(view)
+    if not entry or "scale" not in entry:
+        raise SpecError(f"View {view!r} has no scale yet. Run: print3d measure <slug> scale {view} ...")
+    return entry
+
+
+def measure_dim(spec: dict[str, Any], name: str, view: str, points: list[list[float]]) -> dict[str, Any]:
+    scale = _view(spec, view)["scale"]
+    px = _span(points)
+    mm = px * scale["mm_per_px"]
+    # Two picked ends on the feature, plus the reference's own picking error carried as a ratio.
+    pick = math.sqrt(2) * PICK_ERROR_PX
+    tolerance = pick * scale["mm_per_px"] + mm * pick / scale["ref_px"]
+    entry = {
+        "mm": round(mm, 2),
+        "source": "measured",
+        "tolerance_mm": round(tolerance, 2),
+        "view": view,
+        "points": points,
+        "px": round(px, 2),
+    }
+    spec["dims"][name] = entry
+    return entry
+
+
+def given_dim(spec: dict[str, Any], name: str, mm: float, source: str, why: str | None) -> dict[str, Any]:
+    if source not in ("user", "assumed"):
+        raise SpecError("A dimension typed in is either `user` (they said so) or `assumed` (you chose it).")
+    if source == "assumed" and not why:
+        raise SpecError("Say why: an assumed dimension needs --why.")
+    entry: dict[str, Any] = {"mm": mm, "source": source}
+    if why:
+        entry["why"] = why
+    spec["dims"][name] = entry
+    return entry
+
+
+def set_outline(
+    spec: dict[str, Any], view: str, *, points: list[list[float]] | None = None, mask: Path | None = None
+) -> dict[str, Any]:
+    entry = _view(spec, view)
+    if points is not None:
+        if len(points) < 3:
+            raise SpecError("An outline needs at least 3 points.")
+        entry["outline"] = points
+        entry.pop("mask", None)
+    elif mask is not None:
+        entry["mask"] = str(mask.expanduser().resolve())
+        entry.pop("outline", None)
+    else:
+        raise SpecError("Give the outline as --points or --mask.")
+    return entry
+
+
+def add_unknown(spec: dict[str, Any], text: str) -> list[str]:
+    if text not in spec["unknowns"]:
+        spec["unknowns"].append(text)
+    return spec["unknowns"]
+
+
+def model_dims(spec: dict[str, Any]) -> dict[str, float]:
+    """What a model script sees as `params["dims"]`."""
+    return {name: entry["mm"] for name, entry in spec.get("dims", {}).items()}

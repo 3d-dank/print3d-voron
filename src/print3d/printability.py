@@ -203,9 +203,11 @@ def _minutes(estimate: str | None) -> float | None:
     return round(total, 1) if total else None
 
 
-def advise(mesh: dict[str, Any], slice_: dict[str, Any] | None = None) -> list[Advice]:
+def advise(
+    mesh: dict[str, Any], slice_: dict[str, Any] | None = None, extra: list[Advice] = ()
+) -> list[Advice]:
     """Actionable notes, phrased as changes to make in the model script."""
-    notes: list[Advice] = []
+    notes: list[Advice] = list(extra)
     fraction = mesh["overhang_fraction"]
     if fraction >= OVERHANG_FRACTION_ERROR:
         notes.append(

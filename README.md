@@ -1,6 +1,7 @@
 # print3d
 
-Turn an idea into a Bambu Studio project for a **Bambu Lab X2D (0.4 mm nozzle)**.
+Turn an idea, or a photo of an object, into a Bambu Studio project for a
+**Bambu Lab X2D (0.4 mm nozzle)**.
 
 You (or an agent) write a Blender script that builds the part. `print3d` runs it,
 checks the mesh, slices it with Bambu Studio, and tells you what to fix. Repeat
@@ -51,6 +52,9 @@ Other commands:
 | `slice model.stl` | Check and slice an existing mesh |
 | `check model.stl` | Printability checks only |
 | `inspect job.gcode.3mf` | Time, filament and layers of a sliced job |
+| `grid photo.jpg` | Pixel coordinates over a photo, or a zoomed `--crop` |
+| `measure <slug> ...` | Record scale, dimensions, outlines and unknowns in `spec.json` |
+| `likeness <slug>` | Compare the mesh with the photographed outlines |
 | `plan model.stl out.gcode.3mf` | Show the Studio command without running it |
 | `flatten` | Rebuild the X2D presets in `profiles/x2d-0.4/` |
 
@@ -68,12 +72,41 @@ Plain bpy that builds geometry. `examples/nameplate.py` is the reference.
 
 More recipes and gotchas: `skill/references/modelling.md`.
 
+## From a photo
+
+Photograph the object square-on, from a distance, next to something of known
+size: a bank card, a coin, an A4 sheet, a ruler. `print3d` turns the photo into
+measurements you can trace back, and checks that the model looks like it.
+
+```bash
+print3d grid knob.jpg --crop 120,340,260,420     # read exact pixels off a zoomed crop
+print3d measure knob scale front knob.jpg --ref card --points 131,352,559,352
+print3d measure knob dim diameter --view front --points 610,400,790,400
+print3d measure knob dim bore --mm 6 --source user
+print3d measure knob outline front --points 610,300,790,300,790,520,610,520
+print3d make "knob"                               # the model reads params["dims"]
+```
+
+Each dimension in `jobs/<slug>/spec.json` records where it came from (measured,
+given by you, or assumed with a reason) and, when measured, the pixels, the
+reference and a tolerance. Whatever no photo shows is listed as an unknown.
+
+Every outlined view adds a **likeness** check to the run. The STL is projected
+along that view, scaled to the photo, and laid over it. If the shape or size
+is wrong, or the part is turned or mirrored, the run fails just like it does for
+an overhang. `jobs/<slug>/likeness/<view>.png` shows the difference: red is in
+the photo but missing from the model, blue is in the model but not in the photo.
+
+The full workflow is in `skill/references/from-photo.md`.
+
 ## What gets checked
 
 - **The mesh:** overhangs steeper than 45°, bed contact, tall-and-narrow parts,
   parts too thin to print. Supports are off in the pinned preset, so an overhang
   is a real defect.
 - **The slice:** print time, filament, and how much material each layer adds.
+- **The likeness**, when you worked from a photo: outline overlap and size
+  against each photographed view.
 
 Every problem comes with a `fix` telling you what to change in the script.
 `jobs/<slug>/history.jsonl` keeps a record of each run.
@@ -86,7 +119,8 @@ Every problem comes with a `fix` telling you what to change in the script.
 ln -sfn "$(pwd)/skill" ~/.claude/skills/print3d
 ```
 
-Then type `/print3d a 40mm nameplate that says MARCO`.
+Then type `/print3d a 40mm nameplate that says MARCO`, or
+`/print3d recreate this knob ~/Desktop/knob.jpg`.
 
 ## Tests
 

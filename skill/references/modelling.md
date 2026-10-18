@@ -73,12 +73,11 @@ obj.rotation_euler = (math.pi, 0, 0)
 bpy.ops.object.transform_apply(rotation=True)
 ```
 
-## Working from a reference image
+## Working from a photo
 
-A photo carries no scale, so pick one real dimension, say it out loud, and drive
-everything else off it in `params["size_mm"]`. Build parametrically: name the
-driving numbers at the top of the script so the next iteration is an edit to one
-constant rather than a rewrite.
+`references/from-photo.md`. Drive the script from `params["dims"]`: name the
+driving numbers at the top so the next iteration is an edit to one dimension
+rather than a rewrite.
 
 ## Checking without a full run
 

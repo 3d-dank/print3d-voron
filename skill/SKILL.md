@@ -1,7 +1,7 @@
 ---
 name: print3d
-description: Model a part in Blender, slice it for the Bambu X2D, and iterate until it prints clean.
-argument-hint: "[what to make, and/or a reference image]"
+description: Model a part in Blender from an idea or a photo of an object, slice it for the Bambu X2D, and iterate until it prints clean and matches the photo.
+argument-hint: "[what to make, and/or a photo of the object]"
 disable-model-invocation: true
 ---
 
@@ -11,9 +11,9 @@ Run everything from the repo root (the parent of this skill folder). `print3d` b
 `.venv/bin/python -m print3d`.
 
 ```
-idea / image / text  →  model.py (Blender)  →  mesh  →  DFM + printability
-                             ↑                                │
-                             └────────  advice: what to fix ───┘
+idea / photo / text  →  model.py (Blender)  →  mesh  →  DFM + printability
+        │                    ↑                         + likeness to the photo
+    spec.json                └────────  advice: what to fix ───┘
                                               │
                                         slice → .3mf → user prints from Studio
 ```
@@ -23,10 +23,13 @@ Nothing here reaches the printer. The last step is a sentence handing the user a
 
 ## 1. Read the brief
 
-Size, text, colour, what the part has to do. From a reference image, describe
-what you see and state the dimensions you are assuming — a photo carries no
-scale. Ask at most one question, and only when a missing number makes the part
-unprintable.
+Size, text, colour, what the part has to do. Ask at most one question, and
+only when a missing number makes the part unprintable.
+
+**From a photo of an object:** scaffold (step 2) for the slug, then work through
+`references/from-photo.md` before writing the model. It turns the photo into a
+`spec.json` of measured, given and assumed dimensions, and adds the `likeness`
+check that compares the model with the photo.
 
 ## 2. Scaffold
 
@@ -43,7 +46,7 @@ Replace the scaffold's body with the real part. The contract:
 
 - Plain bpy. **1 Blender unit == 1 mm.**
 - `params` is in scope: `prompt`, `slug`, `text`, `intent`, `size_mm`, `color`,
-  `material`.
+  `material`, and `dims` (name -> mm from `spec.json`).
 - Leave the geometry as mesh objects. The harness joins them, removes doubles,
   fills holes, recalculates normals, triangulates, centres the part, drops it on
   the bed and exports.
@@ -71,13 +74,14 @@ Hand over only once it is green.
 
 ## 5. Look at the plate
 
-Read the PNG at `plate_png`. The numbers go green on parts that are printable
-and still wrong — mirrored text, a hole in the wrong face, letters too shallow
+Read the PNG at `plate_png`, and each `likeness[].overlay` when there is one.
+The numbers go green on parts that are printable and still wrong — mirrored text, a hole in the wrong face, letters too shallow
 to read. Look before you hand it over.
 
 ## 6. Hand off
 
-Report time, grams and layers, then give the path:
+Report time, grams and layers. From a photo, also list which dimensions were
+measured, given or assumed, and the unknowns. Then give the path:
 
 ```
 jobs/<slug>/slice/<slug>.3mf
@@ -90,8 +94,8 @@ if the preview is not what they wanted.
 
 ## Done when
 
-`print3d make` exits 0, no note is at `error`, you have looked at the plate PNG,
-and the user has the `.3mf` path.
+`print3d make` exits 0, no note is at `error`, you have looked at the plate PNG
+and any likeness overlays, and the user has the `.3mf` path.
 
 ## The machine
 

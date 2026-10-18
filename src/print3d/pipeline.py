@@ -1,8 +1,8 @@
 """Idea to a reviewable Bambu Studio project.
 
-    prompt or image  ->  Blender model script  ->  mesh  ->  DFM + printability
-                              ^                                    |
-                              +---- advice tells you what to fix ---+
+    prompt or photos  ->  Blender model script  ->  mesh  ->  DFM + printability
+         |                    ^                                + likeness to the photos
+     spec.json                +---- advice tells you what to fix ---+
                                               |
                                         slice -> .3mf -> review in Studio
 
@@ -19,9 +19,11 @@ from typing import Any
 from print3d.blender import BlenderError, run_model_script, scaffold_script
 from print3d.brief import PrintBrief, parse_brief
 from print3d.dfm import require_printable
+from print3d.likeness import check_likeness, likeness_advice
 from print3d.paths import default_jobs_dir, default_profiles_dir
 from print3d.printability import advise, analyze_mesh, analyze_slice, worst_severity
 from print3d.project import extract_plate_png, inspect_project
+from print3d.spec import load_spec, model_dims
 from print3d.studio import SliceRequest, run_slice, slice_plan
 
 MODEL_SCRIPT = "model.py"
@@ -92,6 +94,9 @@ def run_job(
             )
 
     report: dict[str, Any] = {"brief": brief.as_dict(), "job_dir": str(job_dir)}
+    spec = load_spec(job_dir)
+    if spec["dims"] or spec["unknowns"]:
+        report["spec"] = {"dims": spec["dims"], "unknowns": spec["unknowns"]}
     (job_dir / "brief.json").write_text(json.dumps(brief.as_dict(), indent=2) + "\n", encoding="utf-8")
 
     # 1-2. Model.
@@ -105,7 +110,7 @@ def run_job(
         mesh_path = job_dir / "mesh" / f"{brief.slug}.stl"
         try:
             report["model"] = run_model_script(
-                model_script, mesh_path, params=_model_params(brief)
+                model_script, mesh_path, params={**_model_params(brief), "dims": model_dims(spec)}
             )
         except BlenderError as exc:
             raise PipelineError(str(exc)) from exc
@@ -116,6 +121,10 @@ def run_job(
     report["dfm"] = dfm.as_dict()
     mesh_metrics = analyze_mesh(mesh_path)
     report["mesh_metrics"] = mesh_metrics
+    likeness = check_likeness(mesh_path, spec, job_dir / "likeness")
+    if likeness:
+        report["likeness"] = likeness
+    likeness_notes = likeness_advice(likeness)
 
     request = SliceRequest(
         input_mesh=mesh_path,
@@ -134,7 +143,9 @@ def run_job(
 
     if not execute:
         report["status"] = "dry_run"
-        report["advice"] = [note.as_dict() for note in advise(mesh_metrics)]
+        notes = advise(mesh_metrics, extra=likeness_notes)
+        report["advice"] = [note.as_dict() for note in notes]
+        report["severity"] = worst_severity(notes)
         return report
 
     # 4. Slice, then read back what the slicer actually did.
@@ -143,7 +154,7 @@ def run_job(
     inspection = inspect_project(project)
     png = extract_plate_png(project, job_dir / "slice" / f"{brief.slug}_plate.png")
     slice_metrics = analyze_slice(project)
-    notes = advise(mesh_metrics, slice_metrics)
+    notes = advise(mesh_metrics, slice_metrics, extra=likeness_notes)
     severity = worst_severity(notes)
 
     report.update(
@@ -182,6 +193,7 @@ def run_job(
             "estimated_minutes": slice_metrics["estimated_minutes"],
             "filament_g": slice_metrics["filament_g"],
             "codes": [note.code for note in notes],
+            "likeness": {r["view"]: r["iou"] for r in likeness},
         },
     )
     return report
