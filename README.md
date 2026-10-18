@@ -3,12 +3,12 @@
 Turn an idea, or a photo of an object, into a Bambu Studio project for a
 **Bambu Lab X2D (0.4 mm nozzle)**.
 
-![From a web photo of a LEGO brick to a sliced, printable model, in eight steps](docs/workflow.gif)
+![From a museum photo of a wooden peg to a sliced, printable model, in eight steps](docs/workflow.gif)
 
-*A LEGO brick from a photo off the web: rectify the top face, measure with
+*A clothes peg from a museum photo: scale it from the ruler, measure with
 evidence, model, check the match, slice. [Full-resolution video](docs/workflow.mp4) ·
-[stills](docs/workflow/) · [the benchmark](#benchmark-a-lego-brick-from-a-web-photo).
-Rebuild them with `scripts/workflow_media.py`.*
+[stills](docs/workflow/) · [the benchmark](#benchmark-a-clothes-peg-from-a-museum-photo).
+Rebuild them with `scripts/workflow_media.py`. Photo: Auckland Museum, CC BY 4.0.*
 
 You (or an agent) write a Blender script that builds the part. `print3d` runs it,
 checks the mesh, slices it with Bambu Studio, and tells you what to fix. Repeat
@@ -122,42 +122,39 @@ finds it where its two edges cross.
 
 The full workflow is in `src/print3d/skill/references/from-photo.md`.
 
-### Benchmark: a LEGO brick from a web photo
+### Benchmark: a clothes peg from a museum photo
 
-![A three-quarter photo of a LEGO 2x4 brick, its top face rectified with the model's outline in blue, and the sliced model](docs/lego-benchmark.jpg)
+A wooden dolly peg from the Auckland Museum collection, photographed square-on
+beside a centimetre ruler. The scale comes from the ruler (6 to 20 cm, 140 mm
+across 905 px), never from the peg, and the result is scored against the
+museum's catalogue record:
 
-A three-quarter photo off Wikimedia Commons, no scale reference in it. The top
-face is rectified from the brick's 31.8 x 15.8 mm footprint; its back-right
-corner is hidden behind a stud and found from its two edges. The studs are then
-measured where their bases meet the face, and scored against LEGO's published
-dimensions:
+| | from the photo | catalogue |
+| --- | --- | --- |
+| length | 114.9 ± 1.2 mm | 115 mm |
+| diameter, widest (across the spring) | 18.7 ± 0.7 mm | 20 mm |
+| slot | 49% of the length | "approximately half way" |
 
-| | from the photo | LEGO | error |
-| --- | --- | --- | --- |
-| stud pitch, along | 8.02 ± 0.22 mm | 8.0 mm | 0.02 mm |
-| stud pitch, across | 8.05 ± 0.36 mm | 8.0 mm | 0.05 mm |
-| stud to edge | 1.45 ± 0.24 mm | 1.5 mm | 0.05 mm |
-| stud diameter (from the three above) | 4.85 mm | 4.8 mm | 0.05 mm |
+The catalogue rounds to 5 mm, so both readings land inside it; the diameter's
+1.3 mm gap is about what that rounding allows, not a measurement you should
+trust to a tenth. The knob, neck, body and slot are measured too; the catalogue
+has nothing to score them against.
 
-The brick built from those numbers (`examples/lego_2x4.py`) covers the photo's
-top face at 99% and slices clean: 57 layers, 12 minutes, 2.8 g.
+The peg built from those numbers (`examples/dolly_peg.py`) covers the photo's
+outline at 90%, after the likeness check levels the photo by 1.5 degrees, and
+slices clean: 575 layers, 49 minutes, 7.2 g. It prints standing on its knob,
+and the run says so honestly: a 115 mm part on a 14.5 mm foot is slender, so
+add a brim in Studio. What the photo cannot give is recorded as such: the
+spring is steel wire and is not printed, and the end chamfers are assumed.
 
-What the photo cannot give is recorded as such: the height is given (9.6 mm),
-and the stud height is assumed, because a stud stands off the rectified face
-and smears with the viewing angle (read straight off the image, a stud looks
-7.3 mm wide). One reading went wrong: stud-to-edge measured from the front edge
-came out at 1.95 mm, where the base's shadow fades. It is left out of the
-table's inputs, which is the call the tolerance cannot make for you.
+Replay it with `pytest tests/test_peg_benchmark.py`; the end-to-end Blender and
+Studio run is in `tests/test_studio_it.py`.
 
-Replay it with `pytest tests/test_lego_benchmark.py`; the end-to-end Blender and
-Studio run is in `tests/test_studio_it.py`. Whether the printed studs grip a
-real brick is the next test, and a printer's.
-
-Photo: "Light Green Lego Brick" by Stilfehler,
-[CC BY-SA 3.0](https://creativecommons.org/licenses/by-sa/3.0/), via
-[Wikimedia Commons](https://commons.wikimedia.org/wiki/File:Light_Green_Lego_Brick.jpg);
-the figure above and `docs/workflow*` are shared under the same licence. LEGO is a trademark of the
-LEGO Group, which does not sponsor or endorse this project.
+Photo: "Peg, clothes (AM 1999.92.3-1)", Collection of Auckland Museum Tāmaki
+Paenga Hira, 1999.92.3,
+[CC BY 4.0](https://creativecommons.org/licenses/by/4.0/), via
+[Wikimedia Commons](https://commons.wikimedia.org/wiki/File:Peg,_clothes_(AM_1999.92.3-1).jpg).
+`docs/workflow*` are made from it.
 
 ## What gets checked
 

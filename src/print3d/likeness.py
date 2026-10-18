@@ -9,8 +9,9 @@ centres it on the photographed outline, and compares the two:
   - `shape_iou`  overlap with the model stretched onto the photo's box: shape alone
   - size         the two boxes in mm, against what the photo can resolve
 
-It also tries the other seven ways the same silhouette could be turned or
-mirrored. A much better match there means the view axes, or the part's
+The photo is levelled first: up to six degrees of tilt are tried and the best
+kept, as `tilt_deg`. It also tries the other seven ways the same silhouette
+could be turned or mirrored. A much better match there means the view axes, or the part's
 orientation, are wrong rather than the geometry.
 
 The projection is orthographic. A photo taken close up has perspective, which
@@ -37,6 +38,8 @@ ALTERNATIVE_MARGIN = 0.05
 MIN_SIZE_TOL_MM = 0.5
 WORK_PX = 600
 MARGIN = 1.15
+# How far off level a photo may be. Zero first, so a level photo stays as it is.
+TILTS_DEG = [0.0] + [sign * step / 2 for step in range(1, 13) for sign in (1, -1)]
 
 Vec = tuple[int, int, int]
 
@@ -135,7 +138,6 @@ def compare_view(triangles, name: str, view: dict[str, Any], out_dir: Path) -> d
     right = _cross(look, up)
 
     photo_px = (bbox[2] - bbox[0], bbox[3] - bbox[1])
-    photo_mm = (photo_px[0] * mm_per_px, photo_px[1] * mm_per_px)
     flat = project(triangles, right, up)
     model_mm = extent(flat)
 
@@ -151,18 +153,31 @@ def compare_view(triangles, name: str, view: dict[str, Any], out_dir: Path) -> d
     cx, cy = (bbox[0] + bbox[2]) / 2, (bbox[1] + bbox[3]) / 2
     half = side / shrink / 2
     region = (round(cx - half), round(cy - half), round(cx + half), round(cy + half))
-    photo_mask = mask.crop(region).resize((side, side), Image.NEAREST)
+    photo_canvas = mask.crop(region).resize((side, side), Image.NEAREST)
+
+    # Photos are rarely level, and a degree of tilt costs a slender part much of its
+    # overlap. Level the photo against the model before comparing anything.
+    model_centred = _centred(model, side)
+    tilt = max(TILTS_DEG, key=lambda a: _iou(_level(photo_canvas, a, side)[0], model_centred))
+    photo_mask, level_box = _level(photo_canvas, tilt, side)
+    photo_mm = ((level_box[2] - level_box[0]) * cell_mm, (level_box[3] - level_box[1]) * cell_mm)
 
     poses = [(_iou(photo_mask, _centred(img, side)), r, u, img) for img, r, u in _poses(model, right, up)]
     iou, _, _, posed = poses[0]
     best_iou, best_right, best_up, _ = max(poses, key=lambda pose: pose[0])
 
-    photo_box = (max(1, round(photo_px[0] * shrink)), max(1, round(photo_px[1] * shrink)))
-    shape_iou = _iou(_centred(mask.crop(bbox).resize(photo_box, Image.NEAREST), side), _centred(_fit(model, photo_box), side))
+    photo_box = (level_box[2] - level_box[0], level_box[3] - level_box[1])
+    shape_iou = _iou(photo_mask, _centred(_fit(model, photo_box), side))
 
-    model_mask = _centred(posed, side)
     overlay = out_dir / f"{name}.png"
-    _draw_overlay(Path(view["photo"]), region, side, photo_mask, model_mask, overlay)
+    base = Image.new("RGB", (region[2] - region[0], region[3] - region[1]), "white")
+    # The region can run past the photo's edges; past them is background, not black.
+    base.paste(open_upright(Path(view["photo"])), (-region[0], -region[1]))
+    base = base.resize((side, side), Image.LANCZOS).rotate(tilt, Image.BICUBIC, fillcolor="white")
+    # Shift the levelled photo exactly as its outline was centred.
+    level_base = Image.new("RGB", (side, side), "white")
+    level_base.paste(base, ((side - photo_box[0]) // 2 - level_box[0], (side - photo_box[1]) // 2 - level_box[1]))
+    _draw_overlay(level_base, photo_mask, _centred(posed, side), overlay)
 
     pick = math.sqrt(2) * PICK_ERROR_PX
     tolerance = [
@@ -177,6 +192,7 @@ def compare_view(triangles, name: str, view: dict[str, Any], out_dir: Path) -> d
         "photo_mm": [round(d, 2) for d in photo_mm],
         "model_mm": [round(d, 2) for d in model_mm],
         "tolerance_mm": [round(t, 2) for t in tolerance],
+        "tilt_deg": tilt,
         "overlay": str(overlay),
     }
     if best_iou > iou + ALTERNATIVE_MARGIN:
@@ -188,16 +204,19 @@ def compare_view(triangles, name: str, view: dict[str, Any], out_dir: Path) -> d
     return result
 
 
-def _draw_overlay(photo: Path, region, side: int, photo_mask, model_mask, out: Path) -> None:
+def _level(mask: Image.Image, angle: float, side: int) -> tuple[Image.Image, tuple[int, int, int, int]]:
+    """Turn a photo mask by `angle` degrees and centre what is on it; also return its box before centring."""
+    turned = mask.rotate(angle, Image.NEAREST, fillcolor=0) if angle else mask
+    box = turned.getbbox() or (0, 0, 1, 1)
+    return _centred(turned.crop(box), side), box
+
+
+def _draw_overlay(base: Image.Image, photo_mask, model_mask, out: Path) -> None:
     """Red: in the photo, missing from the model. Blue: in the model, not in the photo.
 
     The model's outline is drawn in blue as well, so a good match still shows where it sits.
     """
-    photo_image = open_upright(photo)
-    # The region can run past the photo's edges; past them is background, not black.
-    canvas = Image.new("RGB", (region[2] - region[0], region[3] - region[1]), "white")
-    canvas.paste(photo_image, (-region[0], -region[1]))
-    base = canvas.resize((side, side), Image.LANCZOS)
+    side = base.width
     only_photo = ImageChops.logical_and(photo_mask, ImageChops.logical_xor(photo_mask, model_mask))
     only_model = ImageChops.logical_and(model_mask, ImageChops.logical_xor(photo_mask, model_mask))
     for mask, colour in ((only_photo, (230, 40, 40)), (only_model, (40, 90, 230))):
@@ -246,6 +265,7 @@ def likeness_advice(results: list[dict[str, Any]]) -> list[Advice]:
             f"{r['view']} view: the model covers the photo's outline {r['iou']:.0%} "
             f"({r['shape_iou']:.0%} on shape alone). Photo {pw:.1f} x {ph:.1f} mm, "
             f"model {mw:.1f} x {mh:.1f} mm."
+            + (f" The photo was levelled by {r['tilt_deg']:+.1f} deg." if r.get("tilt_deg") else "")
         )
         if "better_pose" in r:
             pose = r["better_pose"]
