@@ -56,16 +56,16 @@ def test_advice_catches_an_unsupported_ceiling(tmp_path: Path):
     assert report["slice_metrics"]["max_layer_growth_z"] == pytest.approx(30.2, abs=0.3)
 
 
-def test_lego_brick_from_a_web_photo(tmp_path: Path):
-    from test_lego_benchmark import TRUTH, build_spec
 
-    prompt = "a lego 2x4 brick"
-    build_spec(tmp_path / "a_lego_2x4_brick")
-    report = run_job(prompt, script=repo_root() / "examples" / "lego_2x4.py", jobs_dir=tmp_path, execute=True)
+def test_dolly_peg_from_a_museum_photo(tmp_path: Path):
+    from test_peg_benchmark import build_spec
+
+    build_spec(tmp_path / "a_dolly_peg")
+    report = run_job("a dolly peg", script=repo_root() / "examples" / "dolly_peg.py", jobs_dir=tmp_path, execute=True)
     assert report["status"] == "ready_for_review", report["advice"]
     assert report["model"]["non_manifold_edges"] == 0
-    assert report["model"]["size_mm"] == pytest.approx(
-        [TRUTH["length"], TRUTH["width"], TRUTH["height"] + TRUTH["stud_height"]], abs=0.01
-    )
+    dims = report["spec"]["dims"]
+    assert report["model"]["size_mm"][2] == pytest.approx(dims["length"]["mm"], abs=0.01)
     [likeness] = report["likeness"]
-    assert likeness["iou"] > 0.97
+    assert likeness["iou"] > 0.89
+    assert "better_pose" not in likeness

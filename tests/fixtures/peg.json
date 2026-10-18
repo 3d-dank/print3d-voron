@@ -1,0 +1,25 @@
+{
+  "about": "Points read off grid crops of peg.jpg, a museum photo taken square-on beside a cm ruler. The catalogue dimensions are what the measurements are scored against; both are whole multiples of 5 mm.",
+  "ruler": {"ref_mm": 140, "points": [[42.5, 400], [947.5, 400]], "note": "the 6 cm and 20 cm ticks"},
+  "measured": {
+    "length": [[130, 200], [873, 200]],
+    "spring_diameter": [[480, 130], [480, 251]],
+    "knob_diameter": [[155, 155], [155, 249]],
+    "knob_length": [[130, 200], [183, 200]],
+    "neck_at": [[130, 200], [230, 200]],
+    "neck_diameter": [[230, 166], [230, 237]],
+    "body_at": [[130, 200], [330, 200]],
+    "body_diameter": [[400, 155], [400, 240]],
+    "slot_length": [[508, 197], [873, 197]],
+    "slot_width": [[520, 192], [520, 203]]
+  },
+  "outline": [
+    [130, 162], [135, 156], [178, 155], [183, 160], [186, 166], [230, 166], [300, 160],
+    [400, 155], [530, 151], [680, 148], [830, 138], [860, 140], [873, 152], [868, 170],
+    [800, 180], [700, 188], [600, 190], [508, 192], [508, 203], [600, 202], [700, 200],
+    [800, 196], [866, 195], [873, 222], [860, 230], [780, 227], [630, 230], [530, 236],
+    [455, 238], [330, 238], [230, 237], [186, 238], [183, 243], [178, 249], [135, 248],
+    [130, 240]
+  ],
+  "catalogue_mm": {"length": 115, "diameter": 20}
+}

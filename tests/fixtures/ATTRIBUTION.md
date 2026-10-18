@@ -1,9 +1,9 @@
 # Third-party fixtures
 
-`lego_2x4.jpg` is "Light Green Lego Brick" by Stilfehler (2009), from
-[Wikimedia Commons](https://commons.wikimedia.org/wiki/File:Light_Green_Lego_Brick.jpg),
-licensed [CC BY-SA 3.0](https://creativecommons.org/licenses/by-sa/3.0/). It is
-the 960 px rendition, unmodified. Images derived from it, such as
-`docs/lego-benchmark.jpg` and `docs/workflow*`, are shared under the same licence.
-
-LEGO is a trademark of the LEGO Group, which does not sponsor or endorse this project.
+`peg.jpg` is "Peg, clothes (AM 1999.92.3-1)", Collection of Auckland Museum
+Tāmaki Paenga Hira, 1999.92.3, from
+[Wikimedia Commons](https://commons.wikimedia.org/wiki/File:Peg,_clothes_(AM_1999.92.3-1).jpg),
+licensed [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) by Auckland
+Museum. It is the original 980 x 464 file, unmodified. The catalogue record gives
+the object's dimensions as length 115 mm and diameter 20 mm. Images made from it,
+such as `docs/workflow*`, carry the same attribution.
