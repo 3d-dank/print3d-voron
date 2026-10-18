@@ -3,6 +3,13 @@
 Turn an idea, or a photo of an object, into a Bambu Studio project for a
 **Bambu Lab X2D (0.4 mm nozzle)**.
 
+![From a web photo of a LEGO brick to a sliced, printable model, in eight steps](docs/workflow.gif)
+
+*A LEGO brick from a photo off the web: rectify the top face, measure with
+evidence, model, check the match, slice. [Full-resolution video](docs/workflow.mp4) ·
+[stills](docs/workflow/) · [the benchmark](#benchmark-a-lego-brick-from-a-web-photo).
+Rebuild them with `scripts/workflow_media.py`.*
+
 You (or an agent) write a Blender script that builds the part. `print3d` runs it,
 checks the mesh, slices it with Bambu Studio, and tells you what to fix. Repeat
 until the checks pass, then open the `.3mf` in Studio and print from there.
@@ -149,7 +156,7 @@ real brick is the next test, and a printer's.
 Photo: "Light Green Lego Brick" by Stilfehler,
 [CC BY-SA 3.0](https://creativecommons.org/licenses/by-sa/3.0/), via
 [Wikimedia Commons](https://commons.wikimedia.org/wiki/File:Light_Green_Lego_Brick.jpg);
-the figure above is shared under the same licence. LEGO is a trademark of the
+the figure above and `docs/workflow*` are shared under the same licence. LEGO is a trademark of the
 LEGO Group, which does not sponsor or endorse this project.
 
 ## What gets checked
