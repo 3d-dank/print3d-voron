@@ -28,12 +28,13 @@ def test_every_cli_step_is_a_tool():
             return {tool.name for tool in (await client.list_tools()).tools}
 
     assert {"guide", "make", "grid", "measure_scale", "measure_dim", "measure_outline",
-            "add_unknown", "show_spec", "likeness", "check"} <= anyio.run(names)
+            "add_unknown", "set_listing", "show_spec", "likeness", "check"} <= anyio.run(names)
 
 
 def test_guide_serves_the_skill():
-    [result] = _call(("guide", {"topic": "from-photo"}))
-    assert "evidence" in result.content[0].text
+    photo, listing = _call(("guide", {"topic": "from-photo"}), ("guide", {"topic": "from-listing"}))
+    assert "evidence" in photo.content[0].text
+    assert "dim:<name>" in listing.content[0].text
 
 
 def test_grid_comes_back_as_an_image(tmp_path, jobs):

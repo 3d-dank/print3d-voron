@@ -1,10 +1,13 @@
 """What we know about the object, and how we know it.
 
 `jobs/<slug>/spec.json` is the evidence behind a model built from photos. Every
-dimension carries its source - measured off a photo, given by the user, or
-assumed - and a measured one keeps the pixels and the scale reference it came
-from, so a wrong number can be traced back and re-measured instead of argued.
+dimension carries its source - measured off a photo, given by the user, quoted
+from a shop listing, or assumed - and a measured one keeps the pixels and the
+scale reference it came from, so a wrong number can be traced back and
+re-measured instead of argued.
 
+    listing:   the product being replaced, when there is one: where it is sold
+               and what it costs
     views:     per photo: the file, its scale reference, the camera axes, and
                optionally the object's outline for the likeness check
     dims:      name -> mm, source, tolerance, evidence
@@ -95,14 +98,26 @@ def _span(points: list[list[float]]) -> float:
     return math.hypot(x2 - x1, y2 - y1)
 
 
-def reference_mm(ref: str) -> float:
+# A listed size is rounded: whole millimetres unless the listing says otherwise.
+LISTING_TOLERANCE_MM = 0.5
+
+
+def reference_mm(spec: dict[str, Any], ref: str) -> tuple[float, float]:
+    """The reference's length and how far off that length can be, both in mm."""
+    if ref.startswith("dim:"):
+        dim = spec["dims"].get(ref[4:])
+        if dim is None or dim["source"] not in ("user", "listing"):
+            raise SpecError(f"{ref!r} must name a dimension given by the user or quoted from the listing.")
+        return dim["mm"], dim.get("tolerance_mm", 0.0)
     if ref in REFERENCES_MM:
-        return REFERENCES_MM[ref]
+        return REFERENCES_MM[ref], 0.0
     try:
-        return float(ref)
+        return float(ref), 0.0
     except ValueError:
         known = ", ".join(sorted(REFERENCES_MM))
-        raise SpecError(f"Unknown reference {ref!r}. Use a length in mm or one of: {known}.") from None
+        raise SpecError(
+            f"Unknown reference {ref!r}. Use a length in mm, dim:<name> for a listed dimension, or one of: {known}."
+        ) from None
 
 
 def set_scale(
@@ -124,7 +139,7 @@ def set_scale(
         raise SpecError(f"View {view!r} is not one of {', '.join(VIEW_AXES)}; pass --look and --up.")
     if look not in AXES or up not in AXES or look[1] == up[1]:
         raise SpecError(f"--look and --up must be two different axes from {', '.join(AXES)}.")
-    ref_len = reference_mm(ref)
+    ref_len, ref_tol = reference_mm(spec, ref)
     entry = spec["views"].setdefault(view, {})
     entry.update(
         {
@@ -134,6 +149,7 @@ def set_scale(
             "scale": {
                 "ref": ref,
                 "ref_mm": ref_len,
+                "ref_tolerance_mm": ref_tol,
                 "points": points,
                 "ref_px": round(ref_px, 2),
                 "mm_per_px": ref_len / ref_px,
@@ -185,13 +201,21 @@ def _view(spec: dict[str, Any], view: str) -> dict[str, Any]:
     return entry
 
 
+def mm_tolerance(scale: dict[str, Any], mm: float, pick_px: float) -> float:
+    """How far off a length read off a scaled view can be.
+
+    The feature's own picking error, plus the reference's picking error and its
+    stated rounding, both carried as a ratio of the length.
+    """
+    ref_ratio = pick_px / scale["ref_px"] + scale.get("ref_tolerance_mm", 0.0) / scale["ref_mm"]
+    return pick_px * scale["mm_per_px"] + mm * ref_ratio
+
+
 def measure_dim(spec: dict[str, Any], name: str, view: str, points: list[list[float]]) -> dict[str, Any]:
     scale = _view(spec, view)["scale"]
     px = _span(points)
     mm = px * scale["mm_per_px"]
-    # Two picked ends on the feature, plus the reference's own picking error carried as a ratio.
-    pick = math.sqrt(2) * PICK_ERROR_PX
-    tolerance = pick * scale["mm_per_px"] + mm * pick / scale["ref_px"]
+    tolerance = mm_tolerance(scale, mm, math.sqrt(2) * PICK_ERROR_PX)
     entry = {
         "mm": round(mm, 2),
         "source": "measured",
@@ -214,6 +238,35 @@ def given_dim(spec: dict[str, Any], name: str, mm: float, source: str, why: str 
         entry["why"] = why
     spec["dims"][name] = entry
     return entry
+
+
+def listing_dim(
+    spec: dict[str, Any], name: str, mm: float, quote: str | None, tolerance_mm: float | None = None
+) -> dict[str, Any]:
+    """A dimension the shop states. The quote is the evidence: the listing's own words."""
+    if not quote:
+        raise SpecError("Quote the listing: a listed dimension needs the text it was read from (--quote).")
+    entry = {
+        "mm": mm,
+        "source": "listing",
+        "tolerance_mm": LISTING_TOLERANCE_MM if tolerance_mm is None else tolerance_mm,
+        "quote": quote,
+    }
+    spec["dims"][name] = entry
+    return entry
+
+
+def set_listing(
+    spec: dict[str, Any],
+    url: str,
+    name: str | None = None,
+    price: float | None = None,
+    currency: str | None = None,
+) -> dict[str, Any]:
+    """The product the part replaces: where its listed dimensions and photos come from."""
+    listing = {"url": url, "name": name, "price": price, "currency": currency}
+    spec["listing"] = {k: v for k, v in listing.items() if v is not None}
+    return spec["listing"]
 
 
 def set_outline(

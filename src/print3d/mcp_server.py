@@ -31,13 +31,16 @@ Iterate until no note is at `error`, then hand the user the .3mf path.
 
 Read guide("workflow") before the first run. From a photo of an object, also read
 guide("from-photo"): it records every dimension with its evidence and adds a
-likeness check against the photo. Nothing here sends anything to the printer.
+likeness check against the photo. To replace something sold in a shop, read
+guide("from-listing"): the listing's stated sizes and product photos stand in for
+the object. Nothing here sends anything to the printer.
 """
 
 GUIDES = {
     "workflow": "SKILL.md",
     "modelling": "references/modelling.md",
     "from-photo": "references/from-photo.md",
+    "from-listing": "references/from-listing.md",
 }
 
 server = MCPServer("print3d", instructions=INSTRUCTIONS)
@@ -76,8 +79,8 @@ def _with_images(payload: dict[str, Any], paths: list[str | None]) -> list[Any]:
 
 
 @tool()
-def guide(topic: Literal["workflow", "modelling", "from-photo"]) -> str:
-    """How to use print3d: the loop, bpy recipes and gotchas, or reverse-engineering from a photo."""
+def guide(topic: Literal["workflow", "modelling", "from-photo", "from-listing"]) -> str:
+    """How to use print3d: the loop, bpy recipes and gotchas, reverse-engineering from a photo or a shop listing."""
     return (skill_dir() / GUIDES[topic]).read_text(encoding="utf-8")
 
 
@@ -128,8 +131,9 @@ def measure_scale(
 ) -> str:
     """Scale a photo from a reference of known length in it.
 
-    `ref` is a length in mm or one of: card, card-short, a4, a4-short, letter,
-    letter-short, euro-1, euro-2, euro-0.50, us-quarter, us-penny, uk-pound.
+    `ref` is a length in mm, dim:<name> for a dimension already quoted from the
+    listing or given by the user, or one of: card, card-short, a4, a4-short,
+    letter, letter-short, euro-1, euro-2, euro-0.50, us-quarter, us-penny, uk-pound.
     `points` are the reference's two ends. Views front/back/left/right/top/bottom
     set the camera axes; for another pose pass look/up (+x, -y, ...) in the printed part.
     """
@@ -173,15 +177,21 @@ def measure_dim(
     view: str | None = None,
     points: list[list[float]] | None = None,
     mm: float | None = None,
-    source: Literal["user", "assumed"] | None = None,
+    source: Literal["user", "listing", "assumed"] | None = None,
     why: str | None = None,
+    quote: str | None = None,
+    tolerance_mm: float | None = None,
 ) -> str:
-    """Record a dimension: measured from two points in a scaled view, or typed in as given or assumed.
+    """Record a dimension: measured from two points in a scaled view, or typed in as given, listed or assumed.
 
+    A `listing` dimension needs `quote`, the listing's own words for it, and
+    `tolerance_mm` when the listing rounds coarser than whole millimetres (5 for cm).
     The model script reads it as params["dims"][name].
     """
     spec = specs.load_spec(_job(slug))
-    if mm is not None:
+    if mm is not None and source == "listing":
+        entry = specs.listing_dim(spec, name, mm, quote, tolerance_mm)
+    elif mm is not None:
         entry = specs.given_dim(spec, name, mm, source or "", why)
     elif view and points:
         entry = specs.measure_dim(spec, name, view, points)
@@ -201,6 +211,15 @@ def measure_outline(
     spec = specs.load_spec(_job(slug))
     entry = specs.set_outline(spec, view, points=points, mask=Path(mask) if mask else None)
     return _saved(slug, spec, entry)
+
+
+@tool()
+def set_listing(
+    slug: str, url: str, name: str | None = None, price: float | None = None, currency: str | None = None
+) -> str:
+    """The product this part replaces: its shop page, name and price."""
+    spec = specs.load_spec(_job(slug))
+    return _saved(slug, spec, specs.set_listing(spec, url, name, price, currency))
 
 
 @tool()

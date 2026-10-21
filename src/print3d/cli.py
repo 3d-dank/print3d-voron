@@ -95,6 +95,8 @@ def cmd_measure(args: argparse.Namespace) -> int:
             spec, args.view, Path(args.photo), specs.parse_points(args.corners, count=4),
             (width, height), job_dir / "views" / f"{args.view}.png", look=args.look, up=args.up,
         )
+    elif args.action == "dim" and args.source == "listing":
+        result = specs.listing_dim(spec, args.name, args.mm, args.quote, args.tolerance)
     elif args.action == "dim" and args.mm is not None:
         result = specs.given_dim(spec, args.name, args.mm, args.source, args.why)
     elif args.action == "dim":
@@ -106,6 +108,8 @@ def cmd_measure(args: argparse.Namespace) -> int:
         result = specs.set_outline(spec, args.view, points=points, mask=Path(args.mask) if args.mask else None)
     elif args.action == "unknown":
         result = specs.add_unknown(spec, args.text)
+    elif args.action == "listing":
+        result = specs.set_listing(spec, args.url, args.name, args.price, args.currency)
     else:
         result = spec
     if args.action != "show":
@@ -256,7 +260,8 @@ def build_parser() -> argparse.ArgumentParser:
     scale = actions.add_parser("scale", help="Scale a photo from a reference object in it")
     scale.add_argument("view", help="front, back, left, right, top, bottom, or your own name")
     scale.add_argument("photo")
-    scale.add_argument("--ref", required=True, help=f"mm, or one of: {', '.join(specs.REFERENCES_MM)}")
+    scale.add_argument("--ref", required=True,
+                       help=f"mm, dim:<name> for a listed dimension, or one of: {', '.join(specs.REFERENCES_MM)}")
     scale.add_argument("--points", required=True, help="x1,y1,x2,y2: the two ends of the reference")
     scale.add_argument("--look", choices=specs.AXES, help="Axis the camera looks along, in the printed part")
     scale.add_argument("--up", choices=specs.AXES, help="Axis pointing up in the photo, in the printed part")
@@ -273,14 +278,22 @@ def build_parser() -> argparse.ArgumentParser:
     dim.add_argument("--view")
     dim.add_argument("--points", help="x1,y1,x2,y2: the two ends of the feature")
     dim.add_argument("--mm", type=float)
-    dim.add_argument("--source", choices=("user", "assumed"))
+    dim.add_argument("--source", choices=("user", "listing", "assumed"))
     dim.add_argument("--why")
+    dim.add_argument("--quote", help="With --source listing: the listing's own words for this dimension")
+    dim.add_argument("--tolerance", type=float,
+                     help=f"With --source listing: how the listing rounds, in mm (default {specs.LISTING_TOLERANCE_MM})")
     outline = actions.add_parser("outline", help="The object's outline in a view, for the likeness check")
     outline.add_argument("view")
     outline.add_argument("--points", help="x,y,x,y,...: polygon around the object")
     outline.add_argument("--mask", help="PNG the size of the photo: object white or opaque")
     unknown = actions.add_parser("unknown", help="Record something no photo shows")
     unknown.add_argument("text")
+    listing = actions.add_parser("listing", help="The product this part replaces: its shop page and price")
+    listing.add_argument("url")
+    listing.add_argument("--name")
+    listing.add_argument("--price", type=float)
+    listing.add_argument("--currency")
     actions.add_parser("show", help="Print the spec")
 
     meet_cmd = sub.add_parser("meet", help="Where two edges cross: a corner hidden behind something")

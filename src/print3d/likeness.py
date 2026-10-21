@@ -29,7 +29,7 @@ from PIL import Image, ImageChops, ImageDraw, ImageFilter
 from print3d.dfm import read_stl
 from print3d.photo import open_upright, view_mask
 from print3d.printability import Advice
-from print3d.spec import PICK_ERROR_PX, load_spec, spec_path
+from print3d.spec import PICK_ERROR_PX, load_spec, mm_tolerance, spec_path
 
 IOU_WARN = 0.90
 IOU_ERROR = 0.80
@@ -180,9 +180,8 @@ def compare_view(triangles, name: str, view: dict[str, Any], out_dir: Path) -> d
     _draw_overlay(level_base, photo_mask, _centred(posed, side), overlay)
 
     pick = math.sqrt(2) * PICK_ERROR_PX
-    tolerance = [
-        max(MIN_SIZE_TOL_MM, 2 * pick * mm_per_px + d * pick / scale["ref_px"]) for d in photo_mm
-    ]
+    # An outline's extent is picked at both edges, each as uncertain as a dimension's end.
+    tolerance = [max(MIN_SIZE_TOL_MM, pick * mm_per_px + mm_tolerance(scale, d, pick)) for d in photo_mm]
     result: dict[str, Any] = {
         "view": name,
         "look": view["look"],

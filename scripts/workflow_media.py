@@ -48,7 +48,7 @@ TURNTABLE = r'''
 import bpy, math, sys
 from mathutils import Vector
 argv = sys.argv[sys.argv.index("--") + 1:]
-stl, out_dir, frames = argv[0], argv[1], int(argv[2])
+stl, out_dir, frames, reach, rise = argv[0], argv[1], int(argv[2]), float(argv[3]), float(argv[4])
 bpy.ops.wm.read_factory_settings(use_empty=True)
 bpy.ops.wm.stl_import(filepath=stl)
 part = bpy.context.selected_objects[0]
@@ -74,10 +74,10 @@ scene.collection.objects.link(target)
 target.location = centre
 track = cam.constraints.new("TRACK_TO")
 track.target = target
-distance = 2.3 * size
+distance = reach * size
 for i in range(frames):
     a = 2 * math.pi * i / frames + math.radians(-35)
-    cam.location = centre + Vector((distance * math.cos(a), distance * math.sin(a), 0.35 * distance))
+    cam.location = centre + Vector((distance * math.cos(a), distance * math.sin(a), rise * distance))
     scene.render.filepath = f"{out_dir}/turn_{i:03d}.png"
     bpy.ops.render.render(write_still=True)
 '''
@@ -96,7 +96,7 @@ def fit(image: Image.Image, box: tuple[int, int]) -> Image.Image:
     return image.resize((round(image.width * scale), round(image.height * scale)), Image.LANCZOS)
 
 
-def frame(step: int, total: int, title: str, subtitle: str, credit: bool = False) -> tuple[Image.Image, ImageDraw.ImageDraw]:
+def frame(step: int, total: int, title: str, subtitle: str, credit: str | None = None) -> tuple[Image.Image, ImageDraw.ImageDraw]:
     canvas = Image.new("RGB", (W, H), "white")
     draw = ImageDraw.Draw(canvas)
     draw.rounded_rectangle([48, 40, 128, 80], radius=20, fill=GREEN)
@@ -104,7 +104,7 @@ def frame(step: int, total: int, title: str, subtitle: str, credit: bool = False
     draw.text((148, 60), title, font=font(38, bold=True), fill=INK, anchor="lm")
     draw.text((148, 100), subtitle, font=font(22), fill=GREY, anchor="lm")
     if credit:
-        draw.text((48, H - 24), CREDIT, font=font(15), fill=GREY, anchor="lm")
+        draw.text((48, H - 24), credit, font=font(15), fill=GREY, anchor="lm")
     draw.text((W - 40, H - 24), "print3d", font=font(18, bold=True), fill=GREEN, anchor="rm")
     return canvas, draw
 
@@ -138,13 +138,14 @@ def run(work: Path) -> tuple[dict, Path]:
     return report, job
 
 
-def turntable(mesh: Path, out: Path, frames: int) -> list[Path]:
+def turntable(mesh: Path, out: Path, frames: int, reach: float = 2.3, rise: float = 0.35) -> list[Path]:
+    """Orbit the mesh: the camera sits `reach` times its size away and `rise` times that up."""
     out.mkdir(parents=True, exist_ok=True)
     script = out / "turntable.py"
     script.write_text(TURNTABLE, encoding="utf-8")
     subprocess.run(
         [str(find_blender()), "--background", "--factory-startup", "--python", str(script),
-         "--", str(mesh), str(out), str(frames)],
+         "--", str(mesh), str(out), str(frames), str(reach), str(rise)],
         check=True, capture_output=True,
     )
     return sorted(out.glob("turn_*.png"))
@@ -159,14 +160,14 @@ def build_frames(report: dict, job: Path, turn: list[Path], work: Path) -> list[
     steps: list[list[Image.Image]] = []
 
     # 1. The photo.
-    canvas, _ = frame(1, total, "A photo of the object", "A museum photo of a wooden peg, taken square-on beside a ruler.", credit=True)
+    canvas, _ = frame(1, total, "A photo of the object", "A museum photo of a wooden peg, taken square-on beside a ruler.", credit=CREDIT)
     paste(canvas, photo, body)
     steps.append([canvas])
 
     # 2. Grid.
     crop = (925, 375, 975, 425)
     grid_png = Path(grid(PHOTO, work / "grid.png", crop=crop, step=5)["grid"])
-    canvas, draw = frame(2, total, "Read pixels off a grid", "print3d grid --crop zooms in; labels are photo pixels, so points are read, not guessed.", credit=True)
+    canvas, draw = frame(2, total, "Read pixels off a grid", "print3d grid --crop zooms in; labels are photo pixels, so points are read, not guessed.", credit=CREDIT)
     marked = photo.copy()
     ImageDraw.Draw(marked).rectangle(crop, outline=RED, width=4)
     paste(canvas, marked, (48, HEAD + 40, 640, H - 80))
@@ -176,7 +177,7 @@ def build_frames(report: dict, job: Path, turn: list[Path], work: Path) -> list[
 
     # 3. Scale.
     (x0, y0), (x1, y1) = BENCH["ruler"]["points"]
-    canvas, _ = frame(3, total, "Scale it from the ruler", "The 6 cm and 20 cm ticks: 140 mm across 905 px. The object never sets its own scale.", credit=True)
+    canvas, _ = frame(3, total, "Scale it from the ruler", "The 6 cm and 20 cm ticks: 140 mm across 905 px. The object never sets its own scale.", credit=CREDIT)
     ruled = photo.copy()
     d = ImageDraw.Draw(ruled)
     d.line([(x0, y0 - 18), (x1, y1 - 18)], fill=RED, width=5)
@@ -188,7 +189,7 @@ def build_frames(report: dict, job: Path, turn: list[Path], work: Path) -> list[
     steps.append([canvas])
 
     # 4. Measure.
-    canvas, draw = frame(4, total, "Measure, with evidence", "Each number keeps its pixels, its reference and a tolerance. What the photo cannot show is labelled.", credit=True)
+    canvas, draw = frame(4, total, "Measure, with evidence", "Each number keeps its pixels, its reference and a tolerance. What the photo cannot show is labelled.", credit=CREDIT)
     ann = photo.crop((95, 85, 905, 330))
     d = ImageDraw.Draw(ann)
     m = BENCH["measured"]
@@ -225,7 +226,7 @@ def build_frames(report: dict, job: Path, turn: list[Path], work: Path) -> list[
     steps.append([canvas])
 
     # 5. Outline.
-    canvas, _ = frame(5, total, "Trace the outline", "measure outline: the shape the model has to match, in photo pixels.", credit=True)
+    canvas, _ = frame(5, total, "Trace the outline", "measure outline: the shape the model has to match, in photo pixels.", credit=CREDIT)
     traced = photo.copy()
     d = ImageDraw.Draw(traced)
     pts = [tuple(p) for p in BENCH["outline"]]
@@ -258,7 +259,7 @@ def build_frames(report: dict, job: Path, turn: list[Path], work: Path) -> list[
 
     # 7. Likeness.
     [like] = report["likeness"]
-    canvas, draw = frame(7, total, "Check it matches the photo", "The model is projected sideways and laid over the photo. A mismatch fails the run.", credit=True)
+    canvas, draw = frame(7, total, "Check it matches the photo", "The model is projected sideways and laid over the photo. A mismatch fails the run.", credit=CREDIT)
     paste(canvas, open_upright(Path(like["overlay"])), (48, HEAD + 16, 720, H - 56))
     draw.text((780, 290), f"{like['iou']:.0%}", font=font(120, bold=True), fill=GREEN, anchor="lm")
     draw.text((784, 380), "overlap with the photo", font=font(26), fill=INK, anchor="lm")
@@ -311,7 +312,7 @@ def results_card(dims: dict) -> Image.Image:
     return canvas
 
 
-def encode(steps: list[list[Image.Image]], work: Path) -> None:
+def encode(steps: list[list[Image.Image]], work: Path, name: str = "workflow") -> None:
     seq = work / "seq"
     seq.mkdir()
     hold, fade = round(HOLD_S * FPS), round(FADE_S * FPS)
@@ -328,17 +329,17 @@ def encode(steps: list[list[Image.Image]], work: Path) -> None:
         image.save(seq / f"{n:05d}.png")
     ffmpeg = shutil.which("ffmpeg")
     if not ffmpeg:
-        raise SystemExit("ffmpeg not found; stills are in docs/workflow/")
+        raise SystemExit(f"ffmpeg not found; stills are in docs/{name}/")
     pattern = str(seq / "%05d.png")
     subprocess.run([ffmpeg, "-y", "-loglevel", "error", "-framerate", str(FPS), "-i", pattern,
-                    "-c:v", "libx264", "-pix_fmt", "yuv420p", "-crf", "20", str(OUT / "workflow.mp4")], check=True)
+                    "-c:v", "libx264", "-pix_fmt", "yuv420p", "-crf", "20", str(OUT / f"{name}.mp4")], check=True)
     palette = work / "palette.png"
     scale = "fps=12,scale=800:-1:flags=lanczos"
     subprocess.run([ffmpeg, "-y", "-loglevel", "error", "-framerate", str(FPS), "-i", pattern,
                     "-vf", f"{scale},palettegen=stats_mode=diff", str(palette)], check=True)
     subprocess.run([ffmpeg, "-y", "-loglevel", "error", "-framerate", str(FPS), "-i", pattern, "-i", str(palette),
                     "-lavfi", f"{scale} [x]; [x][1:v] paletteuse=dither=bayer:bayer_scale=5:diff_mode=rectangle",
-                    str(OUT / "workflow.gif")], check=True)
+                    str(OUT / f"{name}.gif")], check=True)
 
 
 def main() -> None:
