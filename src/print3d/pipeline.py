@@ -97,6 +97,8 @@ def run_job(
     spec = load_spec(job_dir)
     if spec["dims"] or spec["unknowns"]:
         report["spec"] = {"dims": spec["dims"], "unknowns": spec["unknowns"]}
+    if "listing" in spec:
+        report["listing"] = spec["listing"]
     (job_dir / "brief.json").write_text(json.dumps(brief.as_dict(), indent=2) + "\n", encoding="utf-8")
 
     # 1-2. Model.

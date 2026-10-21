@@ -1,0 +1,39 @@
+{
+  "about": "Points read off grid crops of bracket.jpg, a CC0 photo of a steel shelf bracket lying on its side, looking down on the L. Its stated dimensions stand in for a shop listing. The legs stand 20 mm off the table, so their sides show in perspective; every point is on the top plane: the legs' 4 mm top edges and the strut's face. Where the strut meets a leg, the point is where the strut's edge line crosses the leg's inner edge.",
+  "listing": {
+    "url": "https://commons.wikimedia.org/wiki/File:Gray_metallic_shelf_bracket_-_20_x_12_cm_-_A.jpg",
+    "name": "Heavy duty shelf bracket, 20 x 12 cm",
+    "quote": "Gray metallic shelf bracket - 20 x 12 cm. Width: 2 cm. Thickness: 4 mm",
+    "stated_mm": {"long_leg": 200, "short_leg": 120, "width": 20, "thickness": 4},
+    "tolerance_mm": {"long_leg": 5, "short_leg": 5, "width": 5, "thickness": 0.5}
+  },
+  "scale": {"dim": "long_leg", "points": [[86.5, 160], [1481, 140]], "note": "outer face of the short leg to the end of the long one"},
+  "checks": {
+    "short_leg": [[87, 160], [78, 1045]],
+    "width": [[141, 520], [216.6, 650]],
+    "thickness": [[77, 980], [101, 980]]
+  },
+  "checks_note": "width is read across the strut, a flat bar of the same stock seen face-on; thickness across the short leg's top edge.",
+  "measured": {
+    "bend_radius": [[86.5, 224], [86.5, 160]],
+    "strut_wall_top": [[111, 160], [111, 537]],
+    "strut_wall_bottom": [[110, 160], [110, 713]],
+    "strut_shelf_top": [[86.5, 177], [730, 177]],
+    "strut_shelf_bottom": [[86.5, 176], [1015, 176]],
+    "hole_wall_1": [[100, 160], [100, 363.4]],
+    "hole_wall_2": [[100, 160], [100, 929.8]],
+    "hole_shelf_1": [[86.5, 180], [289.4, 180]],
+    "hole_shelf_2": [[86.5, 180], [637.3, 180]],
+    "hole_shelf_3": [[86.5, 180], [1369, 180]],
+    "hole_rim": [[100, 335.8], [100, 391]]
+  },
+  "assumed": {
+    "hole_bore": [4.5, "the holes are seen edge-on; 4.5 mm clears a 4 mm wood screw"]
+  },
+  "outline": [
+    [86.5, 250], [90, 205], [100, 183], [120, 167], [150, 160], [800, 150], [1470, 140], [1478, 145],
+    [1481, 155], [1480, 166], [1015, 175], [110, 713], [101, 1000], [100, 1040], [92, 1046], [82, 1042],
+    [77, 1025], [77, 980]
+  ],
+  "window": [[111, 189], [730, 177], [111, 537]]
+}

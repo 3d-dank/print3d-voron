@@ -1,7 +1,7 @@
 ---
 name: print3d
-description: Model a part in Blender from an idea or a photo of an object, slice it for the Bambu X2D, and iterate until it prints clean and matches the photo.
-argument-hint: "[what to make, and/or a photo of the object]"
+description: Model a part in Blender from an idea, a photo of an object, or the shop listing of something you would otherwise buy, slice it for the Bambu X2D, and iterate until it prints clean and matches the photo.
+argument-hint: "[what to make, a photo of the object, or a shop link]"
 disable-model-invocation: true
 ---
 
@@ -31,6 +31,10 @@ only when a missing number makes the part unprintable.
 `references/from-photo.md` before writing the model. It turns the photo into a
 `spec.json` of measured, given and assumed dimensions, and adds the `likeness`
 check that compares the model with the photo.
+
+**To replace something sold in a shop** (a listing URL or a product name): also
+work through `references/from-listing.md`. The listing's stated dimensions scale
+its product photos, and the hand-off weighs the print against the price.
 
 ## 2. Scaffold
 
@@ -82,7 +86,8 @@ to read. Look before you hand it over.
 ## 6. Hand off
 
 Report time, grams and layers. From a photo, also list which dimensions were
-measured, given or assumed, and the unknowns. Then give the path:
+measured, given, listed or assumed, and the unknowns. From a listing, put the
+grams and time beside the listing's price. Then give the path:
 
 ```
 jobs/<slug>/slice/<slug>.3mf

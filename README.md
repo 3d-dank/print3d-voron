@@ -1,7 +1,7 @@
 # print3d
 
-Turn an idea, or a photo of an object, into a Bambu Studio project for a
-**Bambu Lab X2D (0.4 mm nozzle)**.
+Turn an idea, a photo of an object, or the shop listing of something you would
+otherwise buy, into a Bambu Studio project for a **Bambu Lab X2D (0.4 mm nozzle)**.
 
 ![From a museum photo of a wooden peg to a sliced, printable model, in eight steps](docs/workflow.gif)
 
@@ -67,7 +67,7 @@ Other commands:
 | `check model.stl` | Printability checks only |
 | `inspect job.gcode.3mf` | Time, filament and layers of a sliced job |
 | `grid photo.jpg` | Pixel coordinates over a photo, or a zoomed `--crop` |
-| `measure <slug> ...` | Record scale (or `rectify` an angled face), dimensions, outlines and unknowns in `spec.json` |
+| `measure <slug> ...` | Record scale (or `rectify` an angled face), dimensions, outlines, unknowns and the shop `listing` in `spec.json` |
 | `meet edge edge` | The corner where two edges cross, when it is hidden |
 | `likeness <slug>` | Compare the mesh with the photographed outlines |
 | `plan model.stl out.gcode.3mf` | Show the Studio command without running it |
@@ -156,6 +156,63 @@ Paenga Hira, 1999.92.3,
 [Wikimedia Commons](https://commons.wikimedia.org/wiki/File:Peg,_clothes_(AM_1999.92.3-1).jpg).
 `docs/workflow*` are made from it.
 
+## Instead of buying it
+
+![From a shelf bracket's listing to a sliced, printable model, in eight steps](docs/listing.gif)
+
+*A shelf bracket from its stated sizes: quote them, scale the photo from one,
+measure the rest back, model, check the match, slice.
+[Full-resolution video](docs/listing.mp4) · [stills](docs/listing/). Rebuild
+them with `scripts/listing_media.py`. Photo: Fructibus, CC0.*
+
+You usually don't have the thing you are about to buy, so there is no photo of it
+next to a bank card. The shop listing stands in: its stated sizes are the
+evidence, and one of them scales its product photos.
+
+```bash
+print3d measure hook listing https://shop.example/hook --price 4.99 --currency EUR
+print3d measure hook dim length --mm 120 --source listing --quote "Dimensions: 120 x 45 x 30 mm"
+print3d measure hook scale side hook-side.jpg --ref dim:length --points 52,410,1490,402
+print3d measure hook dim length_measured --view side --points ...   # measure a second listed size back
+```
+
+A listed dimension needs its `--quote`, the listing's own words, and carries the
+listing's rounding (`--tolerance 5` for a size given in cm) into everything
+measured off a photo it scaled. Measuring a second listed size back off the
+photo catches a photo in perspective, a different variant, or the box's size
+quoted as the product's. The run reports the listing beside the print's grams
+and time. The workflow is in `src/print3d/skill/references/from-listing.md`.
+
+### Benchmark: a shelf bracket from its stated sizes
+
+A heavy-duty shelf bracket, photographed lying on its side, with its sizes stated
+the way a listing states them: "20 x 12 cm. Width: 2 cm. Thickness: 4 mm". The
+long leg scales the photo; the other three are measured back and scored against
+what was stated:
+
+| | stated | from the photo |
+| --- | --- | --- |
+| short leg | 12 cm (115 to 125 mm) | 126.9 ± 4.2 mm |
+| width (across the strut, same bar) | 2 cm | 21.6 ± 1.2 mm |
+| thickness | 4 mm | 3.4 ± 0.7 mm |
+
+All three agree within the stated rounding plus the photo's tolerance. The short leg
+is the interesting one: the listing rounds it to the centimetre, and the photo
+pins it tighter, so the model uses the photo's 127 mm. A 120 mm leg would have
+missed the photo by 7 mm. The screw holes (29 mm from the corner on both legs)
+and the strut are measured too; the bore is assumed, since the photo sees the
+holes edge-on.
+
+`examples/shelf_bracket.py` prints it lying on its side with teardrop screw holes,
+covers the photo's outline at 89%, and slices clean: 100 layers, 40 minutes,
+25.6 g. The legs stand 20 mm off the table, so their sides show in perspective;
+every point is read on the top plane, and 89% is about what that allows. Steel at
+4 mm carries a shelf and PLA at 4 mm will not, so the run records it as an unknown
+rather than pretending the replica is a drop-in.
+
+Replay it with `pytest tests/test_bracket_benchmark.py`. Photo: Fructibus,
+[CC0](https://commons.wikimedia.org/wiki/File:Gray_metallic_shelf_bracket_-_20_x_12_cm_-_F.jpg).
+
 ## What gets checked
 
 - **The mesh:** overhangs steeper than 45°, bed contact, tall-and-narrow parts,
@@ -175,10 +232,11 @@ After `print3d setup`, ask your agent for a part. In Claude Code:
 ```text
 /print3d a 40mm nameplate that says MARCO
 /print3d recreate the knob in ~/Desktop/knob.jpg, it sits on a 6 mm D-shaft
+/print3d replace this instead of buying it: https://shop.example/wall-hook
 ```
 
 Codex, Cursor and Gemini get the same steps through MCP: `guide`, `make`,
-`grid`, `measure_*`, `likeness` and `check`. Tools that make pictures (the
+`grid`, `measure_*`, `set_listing`, `likeness` and `check`. Tools that make pictures (the
 coordinate grid, the plate preview, the likeness overlays) return them as
 images, so the agent sees what it built.
 

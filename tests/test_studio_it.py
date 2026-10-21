@@ -69,3 +69,17 @@ def test_dolly_peg_from_a_museum_photo(tmp_path: Path):
     [likeness] = report["likeness"]
     assert likeness["iou"] > 0.89
     assert "better_pose" not in likeness
+
+
+def test_shelf_bracket_from_its_listing(tmp_path: Path):
+    from test_bracket_benchmark import build_spec
+
+    build_spec(tmp_path / "a_shelf_bracket")
+    report = run_job("a shelf bracket", script=repo_root() / "examples" / "shelf_bracket.py",
+                     jobs_dir=tmp_path, execute=True)
+    assert report["status"] == "ready_for_review", report["advice"]
+    assert report["model"]["non_manifold_edges"] == 0
+    assert report["listing"]["name"] == "Heavy duty shelf bracket, 20 x 12 cm"
+    assert report["model"]["size_mm"][2] == pytest.approx(20.0, abs=0.01)
+    [likeness] = report["likeness"]
+    assert likeness["iou"] > 0.88
