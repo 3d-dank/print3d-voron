@@ -20,7 +20,7 @@ print3d = "print3d.cli:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-print3d = ["profiles/*/*", "skill/*.md", "skill/references/*.md"]
+print3d = ["profiles/*/*", "skill/*.md", "skill/references/*.md", "coupons/*.py"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

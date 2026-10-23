@@ -16,8 +16,10 @@ from mcp.server.mcpserver import Image, MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 
 from print3d import spec as specs
+from print3d.fits import load_fits, save_fits
+from print3d.handoff import build_handoff
 from print3d.likeness import check_job
-from print3d.paths import default_jobs_dir, skill_dir
+from print3d.paths import coupon_script, default_jobs_dir, skill_dir
 from print3d.photo import grid as draw_grid
 from print3d.photo import meet as cross
 from print3d.pipeline import run_job
@@ -33,7 +35,9 @@ Read guide("workflow") before the first run. From a photo of an object, also rea
 guide("from-photo"): it records every dimension with its evidence and adds a
 likeness check against the photo. To replace something sold in a shop, read
 guide("from-listing"): the listing's stated sizes and product photos stand in for
-the object. Nothing here sends anything to the printer.
+the object. For more than one part, colours, or parts that fit together, read
+guide("parts"). Once a job is green, `handoff` writes a print sheet for the user
+to share. Nothing here sends anything to the printer.
 """
 
 GUIDES = {
@@ -41,6 +45,7 @@ GUIDES = {
     "modelling": "references/modelling.md",
     "from-photo": "references/from-photo.md",
     "from-listing": "references/from-listing.md",
+    "parts": "references/parts-and-fits.md",
 }
 
 server = MCPServer("print3d", instructions=INSTRUCTIONS)
@@ -79,8 +84,9 @@ def _with_images(payload: dict[str, Any], paths: list[str | None]) -> list[Any]:
 
 
 @tool()
-def guide(topic: Literal["workflow", "modelling", "from-photo", "from-listing"]) -> str:
-    """How to use print3d: the loop, bpy recipes and gotchas, reverse-engineering from a photo or a shop listing."""
+def guide(topic: Literal["workflow", "modelling", "from-photo", "from-listing", "parts"]) -> str:
+    """How to use print3d: the loop, bpy recipes and gotchas, reverse-engineering from a photo or a
+    shop listing, and multi-part, multi-colour models with fits."""
     return (skill_dir() / GUIDES[topic]).read_text(encoding="utf-8")
 
 
@@ -104,7 +110,37 @@ def make(
         execute=not dry_run,
     )
     overlays = [r["overlay"] for r in report.get("likeness", [])]
-    return _with_images(report, [report.get("plate_png"), *overlays])
+    plates = [p["png"] for p in report.get("plates", [])] or [report.get("plate_png")]
+    return _with_images(report, [*plates, *overlays])
+
+
+@tool(images=True)
+def handoff(slug: str, cost_per_kg: float | None = None, currency: str | None = None) -> list[Any]:
+    """Write jobs/<slug>/handoff: a print sheet (HTML), renders, the .3mf and an STL per part.
+
+    Run it once the job is green. Returns the paths, then the renders.
+    """
+    result = build_handoff(_job(slug), cost_per_kg=cost_per_kg, currency=currency or "")
+    return _with_images(result, list(result["renders"].values()))
+
+
+@tool(images=True)
+def fit_coupon() -> list[Any]:
+    """Slice the fit coupon: a pin and holes at 0.00 to 0.40 mm clearance, to calibrate fits on this printer."""
+    report = run_job("fit coupon", script=coupon_script())
+    return _with_images(report, [report.get("plate_png")])
+
+
+@tool()
+def fits(
+    press: float | None = None, snug: float | None = None, slide: float | None = None, free: float | None = None
+) -> str:
+    """This printer's clearance per side for each fit, as model scripts get it in params["fit"].
+
+    Pass values to record what the user felt on the printed fit coupon.
+    """
+    values = {k: v for k, v in {"press": press, "snug": snug, "slide": slide, "free": free}.items() if v is not None}
+    return _json(save_fits(values) if values else load_fits())
 
 
 @tool(images=True)

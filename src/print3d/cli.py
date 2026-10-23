@@ -11,9 +11,11 @@ from print3d.blender import BlenderError, find_blender, run_model_script
 from print3d.brief import parse_brief
 from print3d import setup as installer
 from print3d import spec as specs
+from print3d.fits import KINDS, load_fits, save_fits
 from print3d.flatten import flatten_x2d
+from print3d.handoff import build_handoff
 from print3d.likeness import check_job
-from print3d.paths import default_jobs_dir, default_profiles_dir
+from print3d.paths import coupon_script, default_jobs_dir, default_profiles_dir
 from print3d.photo import grid, meet
 from print3d.pipeline import _model_params, run_job
 from print3d.printability import advise, analyze_mesh, analyze_slice
@@ -39,7 +41,7 @@ def cmd_make(args: argparse.Namespace) -> int:
 
 
 def cmd_model(args: argparse.Namespace) -> int:
-    params = json.loads(args.params) if args.params else {}
+    params = {"fit": load_fits()["clearance_mm"], **(json.loads(args.params) if args.params else {})}
     if args.prompt:
         params = {**_model_params(parse_brief(args.prompt)), **params}
     _print_json(run_model_script(Path(args.script), Path(args.out), params=params))
@@ -129,6 +131,40 @@ def cmd_likeness(args: argparse.Namespace) -> int:
     results, notes = check_job(default_jobs_dir() / args.slug, Path(args.mesh) if args.mesh else None)
     _print_json({"likeness": results, "advice": [note.as_dict() for note in notes]})
     return 1 if any(note.severity == "error" for note in notes) else 0
+
+
+def cmd_handoff(args: argparse.Namespace) -> int:
+    _print_json(
+        build_handoff(
+            default_jobs_dir() / args.slug,
+            cost_per_kg=args.cost_per_kg,
+            currency=args.currency or "",
+            render=not args.no_render,
+        )
+    )
+    return 0
+
+
+def cmd_coupon(args: argparse.Namespace) -> int:
+    report = run_job("fit coupon", script=coupon_script(), execute=not args.dry_run)
+    report["next_step"] = (
+        "Print the .3mf. Push the pin into each hole: the label is the clearance per side in "
+        "hundredths of a mm. Then record what you felt, e.g. "
+        "print3d fit set --press 0.05 --snug 0.10 --slide 0.20 --free 0.35"
+    )
+    _print_json(report)
+    return 1 if report.get("severity") == "error" else 0
+
+
+def cmd_fit(args: argparse.Namespace) -> int:
+    if args.action == "set":
+        values = {kind: getattr(args, kind) for kind in KINDS if getattr(args, kind) is not None}
+        if not values:
+            raise ValueError(f"Give at least one of --{', --'.join(KINDS)}.")
+        _print_json(save_fits(values))
+    else:
+        _print_json(load_fits())
+    return 0
 
 
 def cmd_mcp(_args: argparse.Namespace) -> int:
@@ -305,6 +341,28 @@ def build_parser() -> argparse.ArgumentParser:
     likeness_cmd.add_argument("slug")
     likeness_cmd.add_argument("--mesh", help="Default: jobs/<slug>/mesh/<slug>.stl")
     likeness_cmd.set_defaults(func=cmd_likeness)
+
+    handoff_cmd = sub.add_parser(
+        "handoff", help="A print sheet, renders, the project and an STL per part, in jobs/<slug>/handoff"
+    )
+    handoff_cmd.add_argument("slug")
+    handoff_cmd.add_argument("--cost-per-kg", type=float,
+                             help="Filament price per kg (default: the pinned profile's)")
+    handoff_cmd.add_argument("--currency", help="Shown next to the cost, e.g. EUR")
+    handoff_cmd.add_argument("--no-render", action="store_true", help="Skip the Blender renders")
+    handoff_cmd.set_defaults(func=cmd_handoff)
+
+    coupon_cmd = sub.add_parser("coupon", help="Slice the fit coupon that calibrates press/snug/slide/free")
+    coupon_cmd.add_argument("--dry-run", action="store_true")
+    coupon_cmd.set_defaults(func=cmd_coupon)
+
+    fit_cmd = sub.add_parser("fit", help="Show or record this printer's clearance per fit")
+    fit_cmd.set_defaults(func=cmd_fit)
+    fit_actions = fit_cmd.add_subparsers(dest="action", required=True)
+    fit_actions.add_parser("show", help="The clearances model scripts get as params['fit']")
+    fit_set = fit_actions.add_parser("set", help="Record what the fit coupon showed, per side in mm")
+    for kind in KINDS:
+        fit_set.add_argument(f"--{kind}", type=float)
 
     mcp_cmd = sub.add_parser("mcp", help="Run the MCP server on stdio")
     mcp_cmd.set_defaults(func=cmd_mcp)

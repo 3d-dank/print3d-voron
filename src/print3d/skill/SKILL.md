@@ -36,6 +36,10 @@ check that compares the model with the photo.
 work through `references/from-listing.md`. The listing's stated dimensions scale
 its product photos, and the hand-off weighs the print against the price.
 
+**More than one part, more than one colour, or parts that fit together** (a box
+and lid, a case in halves, a name in a second colour, a pin in a hole): read
+`references/parts-and-fits.md` before writing the model.
+
 ## 2. Scaffold
 
 ```bash
@@ -51,7 +55,13 @@ Replace the scaffold's body with the real part. The contract:
 
 - Plain bpy. **1 Blender unit == 1 mm.**
 - `params` is in scope: `prompt`, `slug`, `text`, `intent`, `size_mm`, `color`,
-  `material`, and `dims` (name -> mm from `spec.json`).
+  `material`, `dims` (name -> mm from `spec.json`) and `fit` (this printer's
+  clearance per side for `press`, `snug`, `slide`, `free`). Size every mating
+  feature from `params["fit"]`, never from a guessed number.
+- Several parts: model each where it sits when assembled and name it with
+  `part(objects, name, color=, group=, rotate=, plate=, settings=)`; declare how
+  two parts mate with `fit(a, b, kind)`. Without `part()` every mesh is joined
+  into one part.
 - Leave the geometry as mesh objects. The harness joins them, removes doubles,
   fills holes, recalculates normals, triangulates, centres the part, drops it on
   the bed and exports.
@@ -79,13 +89,24 @@ Hand over only once it is green.
 
 ## 5. Look at the plate
 
-Read the PNG at `plate_png`, and each `likeness[].overlay` when there is one.
+Read the PNG at `plate_png` (each `plates[].png` for several plates), and each
+`likeness[].overlay` when there is one.
 The numbers go green on parts that are printable and still wrong — mirrored text, a hole in the wrong face, letters too shallow
 to read. Look before you hand it over.
 
 ## 6. Hand off
 
-Report time, grams and layers. From a photo, also list which dimensions were
+```bash
+print3d handoff <slug>
+```
+
+writes `jobs/<slug>/handoff/`: a print sheet the user can send on, renders of
+the part assembled (and exploded, for several parts), the `.3mf` and an STL per
+part. Look at the renders: a colour that does not show, or a part in the wrong
+place, is plain there.
+
+Report time, grams and layers, and for several parts the colours and how each
+declared fit measured. From a photo, also list which dimensions were
 measured, given, listed or assumed, and the unknowns. From a listing, put the
 grams and time beside the listing's price. Then give the path:
 
@@ -100,11 +121,13 @@ if the preview is not what they wanted.
 
 ## Done when
 
-`print3d make` exits 0, no note is at `error`, you have looked at the plate PNG
-and any likeness overlays, and the user has the `.3mf` path.
+`print3d make` exits 0, no note is at `error`, you have looked at the plate PNGs,
+any likeness overlays and the hand-off renders, and the user has the `.3mf` path
+and the print sheet.
 
 ## The machine
 
 X2D, 0.4 mm nozzle, 256 × 256 × 260 mm bed, 0.20 mm layers, Bambu PLA Basic,
 textured PEI plate. **The pinned process has supports off** — that is why an
-overhang note is a real defect and not a setting to flip.
+overhang note is a real defect and not a setting to flip. Two nozzles: two
+colours print without a filament change.

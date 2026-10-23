@@ -12,6 +12,12 @@ in `SKILL.md`; this is what to reach for once you are writing geometry.
 | `slender` | Tall and narrow; it gets knocked off the plate. | Lay it down, or give it a base. |
 | `thin` | Below the practical floor of a 0.4 mm nozzle. | Thicken to ≥ 1.2 mm — three passes. |
 | `layer_jump` | Material starting over air, corroborated by the mesh. | Look at the z it names, then chamfer that ledge. |
+| `interference` | Two parts overlap as assembled. | Cut one back by `params["fit"][kind]` per side. |
+| `fit` | A declared fit is tighter or looser than this printer's clearance. | Size the feature from `params["fit"][kind]`. |
+| `fused` | Two parts nearly touch: too close to print apart. | Make them touch, or open a real fit and declare it. |
+| `buried` | A colour part is sealed inside its partner. | Cut its pocket with a cutter that breaks through the surface. |
+
+Several parts, colours and fits: `parts-and-fits.md`.
 
 Choosing orientation first is the single highest-leverage decision: the flattest
 large face goes on the bed, and most `overhang`/`adhesion`/`slender` notes

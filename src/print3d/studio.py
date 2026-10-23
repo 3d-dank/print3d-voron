@@ -32,6 +32,9 @@ class SliceRequest:
     ensure_on_bed: bool = True
     bed_type: str = "Textured PEI Plate"
     debug_level: int = 2
+    # Several parts: Studio reads the meshes, filaments and plates from this
+    # file instead of from input_mesh.
+    assemble_list: Path | None = None
 
 
 def find_studio(search_path: str | None = None) -> Path:
@@ -65,12 +68,15 @@ def _common_prefix(studio: Path, request: SliceRequest) -> list[str]:
         "--debug",
         str(request.debug_level),
     ]
-    if request.orient:
-        command.extend(["--orient", "1"])
-    if request.arrange:
-        command.extend(["--arrange", "1"])
-    if request.ensure_on_bed:
-        command.append("--ensure-on-bed")
+    # Studio refuses an assemble list combined with transforms; each plate in
+    # the list says whether to arrange it.
+    if request.assemble_list is None:
+        if request.orient:
+            command.extend(["--orient", "1"])
+        if request.arrange:
+            command.extend(["--arrange", "1"])
+        if request.ensure_on_bed:
+            command.append("--ensure-on-bed")
     command.extend(
         [
             "--load-settings",
@@ -86,6 +92,40 @@ def _common_prefix(studio: Path, request: SliceRequest) -> list[str]:
     return command
 
 
+def _models(request: SliceRequest, input_path: Path | None = None) -> list[str]:
+    if request.assemble_list is not None:
+        return ["--load-assemble-list", str(request.assemble_list.resolve())]
+    return [str((input_path or request.input_mesh).resolve())]
+
+
+def assemble_list(objects: list[dict[str, Any]]) -> dict[str, Any]:
+    """Studio's assemble list: one entry per part, fused by group, placed on numbered plates.
+
+    Each object is {"plate": n, "parts": [{"stl", "filament", "settings"}]}; a
+    part's filament is 1-based. Parts of one object share an assemble_index, so
+    Studio prints them as one object with a filament per part.
+    """
+    plates: dict[int, list[dict[str, Any]]] = {}
+    for index, obj in enumerate(objects, start=1):
+        fused = len(obj["parts"]) > 1
+        for part in obj["parts"]:
+            entry = {
+                "path": str(Path(part["stl"]).resolve()),
+                "count": 1,
+                "filaments": [part["filament"]],
+                "assemble_index": [index if fused else 0],
+            }
+            if part.get("settings"):
+                entry["print_params"] = part["settings"]
+            plates.setdefault(obj["plate"], []).append(entry)
+    return {
+        "plates": [
+            {"plate_name": f"plate {n}", "need_arrange": True, "objects": plates[n]}
+            for n in sorted(plates)
+        ]
+    }
+
+
 def project_3mf_path(request: SliceRequest) -> Path:
     if request.output_project_3mf is not None:
         return request.output_project_3mf
@@ -96,7 +136,7 @@ def build_project_command(studio: Path, request: SliceRequest) -> list[str]:
     """Export an unsliced Studio project. File > Open this in the Prepare tab."""
     command = _common_prefix(studio, request)
     command.extend(["--export-3mf", project_3mf_path(request).name])
-    command.append(str(request.input_mesh.resolve()))
+    command.extend(_models(request))
     return command
 
 
@@ -110,7 +150,7 @@ def build_slice_command(studio: Path, request: SliceRequest, *, input_path: Path
             request.output_3mf.name,
         ]
     )
-    command.append(str((input_path or request.input_mesh).resolve()))
+    command.extend(_models(request, input_path))
     return command
 
 
@@ -126,6 +166,7 @@ def _request_dict(request: SliceRequest) -> dict[str, Any]:
         "output_dir": str(request.output_dir),
         "slice_plate": request.slice_plate,
         "bed_type": request.bed_type,
+        "assemble_list": str(request.assemble_list) if request.assemble_list else None,
     }
 
 

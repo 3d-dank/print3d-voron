@@ -100,7 +100,21 @@ def _parse_slice_info(slice_info: str | None) -> dict[str, Any]:
     filaments = []
     for filament in root.findall(".//filament"):
         filaments.append(dict(filament.attrib))
-    return {"metadata": meta, "filaments": filaments}
+    plates = []
+    for plate in root.findall("plate"):
+        plate_meta = {
+            item.attrib["key"]: item.attrib.get("value")
+            for item in plate.findall("metadata")
+            if "key" in item.attrib
+        }
+        plates.append(
+            {
+                "index": int(plate_meta.get("index") or len(plates) + 1),
+                "weight_g": float(plate_meta["weight"]) if plate_meta.get("weight") else None,
+                "filaments": [dict(f.attrib) for f in plate.findall("filament")],
+            }
+        )
+    return {"metadata": meta, "filaments": filaments, "plates": plates}
 
 
 def inspect_project(path: Path) -> dict[str, Any]:
