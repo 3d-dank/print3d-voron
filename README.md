@@ -84,6 +84,23 @@ project file, `jobs/<slug>/slice/<slug>.3mf`. Open that one in Studio: the
 `.gcode.3mf` beside it is the sliced job and won't open in the Prepare tab. Ask
 for a hand-off and you also get a [print sheet](#hand-it-off).
 
+## What it runs and reaches
+
+- **Local programs:** Blender, to run the model scripts the agent writes and to
+  render, and Bambu Studio's command line, to slice. Both run as child processes
+  on your machine, headless.
+- **Files:** jobs are written to `~/print3d/jobs` (or `$PRINT3D_JOBS`), and
+  print3d reads the photos you point it at. Your printer clearances are saved in
+  `~/print3d/fits.json`.
+- **Network:** print3d itself makes no network calls. Installing the plugin asks
+  to add its Python dependencies (Pillow, mcp) to Hermes's environment, and on
+  first start `uvx` downloads them from PyPI for the server's own environment.
+  The 3D view loads three.js from cdn.jsdelivr.net when you open it. A shop
+  listing's URL is recorded, never fetched.
+- **The printer:** nothing is sent to it. You print from Studio.
+- No telemetry, no credentials, no background processes beyond the MCP server
+  Hermes starts.
+
 ## Other agents
 
 For Claude Code, Codex, Cursor or Gemini CLI, or to point Hermes at a print3d
