@@ -1,8 +1,8 @@
 """Register print3d with the coding agents on this machine.
 
 Each agent gets the MCP server, launched with the Python print3d is installed
-in. Claude Code also gets the skill, linked so it follows the installed
-package. Nothing is changed until the plan has been shown; every file edited is
+in. Claude Code and Hermes also get the skill, linked so it follows the
+installed package. Nothing is changed until the plan has been shown; every file edited is
 backed up beside itself first.
 """
 
@@ -20,7 +20,7 @@ from pathlib import Path
 
 from print3d.paths import skill_dir
 
-AGENTS = ("claude", "codex", "cursor", "gemini")
+AGENTS = ("claude", "codex", "cursor", "gemini", "hermes")
 NAME = "print3d"
 
 
@@ -93,6 +93,33 @@ def _merge_codex_toml(path: Path) -> None:
     _write_with_backup(path, text)
 
 
+HERMES_SERVERS = re.compile(r"^mcp_servers:[ \t]*(\{\})?[ \t]*\n?", re.MULTILINE)
+HERMES_ENTRY = re.compile(rf"^  {NAME}:.*\n(?:(?:    .*)?\n)*", re.MULTILINE)
+
+
+def _merge_hermes_yaml(path: Path) -> None:
+    """Add the server under the top-level `mcp_servers:` of Hermes's config.yaml."""
+    command, *args = server_command()
+    entry = (
+        f"  {NAME}:\n"
+        f"    command: {json.dumps(command)}\n"
+        f"    args: {json.dumps(args)}\n"
+        f"    enabled: true\n"
+    )
+    text = path.read_text(encoding="utf-8") if path.is_file() else ""
+    servers = HERMES_SERVERS.search(text)
+    if servers is None:
+        if re.search(r"^mcp_servers:", text, re.MULTILINE):
+            raise SetupError(f"{path} has mcp_servers in a form setup cannot edit; add print3d by hand.")
+        text = (text.rstrip("\n") + "\n" if text.strip() else "") + "mcp_servers:\n" + entry
+    else:
+        head, tail = text[:servers.start()], text[servers.end():]
+        block_end = re.search(r"^\S", tail, re.MULTILINE)
+        block, rest = (tail[:block_end.start()], tail[block_end.start():]) if block_end else (tail, "")
+        text = head + "mcp_servers:\n" + entry + HERMES_ENTRY.sub("", block) + rest
+    _write_with_backup(path, text)
+
+
 def _claude_mcp(claude: str, run: Callable[..., subprocess.CompletedProcess]) -> None:
     run([claude, "mcp", "remove", "--scope", "user", NAME], capture_output=True, text=True, check=False)
     added = run(
@@ -128,6 +155,13 @@ def plan(
             path = home / ".codex" / "config.toml"
             changes.append(Change(agent, str(path), "add [mcp_servers.print3d]",
                                   lambda path=path: _merge_codex_toml(path)))
+        elif agent == "hermes":
+            link = home / ".hermes" / "skills" / NAME
+            changes.append(Change(agent, str(link), f"link the skill to {skill_dir()}",
+                                  lambda link=link: _link(link, skill_dir())))
+            path = home / ".hermes" / "config.yaml"
+            changes.append(Change(agent, str(path), "add mcp_servers.print3d",
+                                  lambda path=path: _merge_hermes_yaml(path)))
         elif agent in ("cursor", "gemini"):
             path = home / f".{agent}" / ("mcp.json" if agent == "cursor" else "settings.json")
             changes.append(Change(agent, str(path), "add mcpServers.print3d",

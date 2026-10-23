@@ -66,3 +66,38 @@ def test_claude_gets_the_skill_linked_and_the_server_added(tmp_path):
     assert list(old.parent.glob("print3d.print3d-backup-*"))
     assert calls[-1][:6] == ["/bin/claude", "mcp", "add", "--scope", "user", "print3d"]
     assert calls[-1][-3:] == ["-m", "print3d", "mcp"]
+
+
+def test_hermes_gets_the_skill_linked_and_the_server_added_once(tmp_path):
+    hermes = tmp_path / ".hermes"
+    (hermes / "skills").mkdir(parents=True)
+    (hermes / "skills" / "print3d").symlink_to(tmp_path / "gone")
+    config = hermes / "config.yaml"
+    config.write_text(
+        "model: x\n"
+        "mcp_servers:\n"
+        "  other:\n"
+        "    command: npx\n"
+        "\n"
+        "  print3d:\n"
+        "    command: /old/python\n"
+        "    args: [-m, print3d, mcp]\n"
+        "skills:\n"
+        "  disabled: []\n"
+    )
+    _apply(tmp_path, ["hermes"])
+    _apply(tmp_path, ["hermes"])
+    text = config.read_text()
+    assert (hermes / "skills" / "print3d").resolve() == skill_dir()
+    assert text.count("  print3d:") == 1 and "/old/python" not in text
+    assert json.dumps(sys.executable) in text
+    assert "  other:\n    command: npx\n" in text
+    assert text.startswith("model: x\n") and text.endswith("skills:\n  disabled: []\n")
+
+
+def test_hermes_config_without_servers_gets_the_section(tmp_path):
+    config = tmp_path / ".hermes" / "config.yaml"
+    config.parent.mkdir()
+    config.write_text("model: x\nmcp_servers: {}\n")
+    _apply(tmp_path, ["hermes"])
+    assert config.read_text().startswith("model: x\nmcp_servers:\n  print3d:\n")

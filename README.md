@@ -38,17 +38,33 @@ uv tool install git+https://github.com/mfranzon/print3d
 print3d setup
 ```
 
-`setup` finds Claude Code, Codex, Cursor and Gemini CLI on this machine, shows
-what it will change, and on your yes registers the print3d MCP server with each
-(Claude Code also gets the `/print3d` skill). Edited config files are backed up
-beside themselves. Restart your agent afterwards. `--dry-run` shows the plan
-without changing anything; `--agent codex` limits it to one agent.
+`setup` finds Claude Code, Codex, Cursor, Gemini CLI and Hermes Agent on this
+machine, shows what it will change, and on your yes registers the print3d MCP
+server with each (Claude Code and Hermes also get the `/print3d` skill). Edited
+config files are backed up beside themselves. Restart your agent afterwards.
+`--dry-run` shows the plan without changing anything; `--agent codex` limits it
+to one agent.
 
 `print3d status` shows where Blender and Studio were found. On macOS this is
 automatic; otherwise set `BLENDER_BIN` and `BAMBU_STUDIO_BIN`. Jobs go to
 `~/print3d/jobs`, or `$PRINT3D_JOBS`.
 
 To update, run `uv tool upgrade print3d`, then `print3d setup` again.
+
+### As a Hermes plugin
+
+Hermes Agent can install print3d as a plugin instead, with no `uv tool install`
+and no `setup`. It still needs Blender, Bambu Studio and uv:
+
+```bash
+hermes plugins install mfranzon/print3d --enable
+```
+
+The plugin brings the skill and the MCP server; the server runs from the
+plugin's own copy through `uvx`, and `hermes plugins update print3d` updates both.
+In the Hermes desktop app, the agent opens each part's 3D view in the preview
+pane beside the chat. A Desktop user can also install from a link:
+`hermes://plugin/install?repo=mfranzon/print3d&enable=1`.
 
 ## Use
 
@@ -76,6 +92,7 @@ Other commands:
 | `meet edge edge` | The corner where two edges cross, when it is hidden |
 | `likeness <slug>` | Compare the mesh with the photographed outlines |
 | `handoff <slug>` | Print sheet, renders, the `.3mf` and an STL per part, in `jobs/<slug>/handoff/` |
+| `view <slug>` | Rebuild `jobs/<slug>/view.html`, the model in 3D to rotate and pull apart |
 | `coupon` | Slice the fit coupon that calibrates your printer's clearances |
 | `fit show` / `fit set` | The clearance per fit that scripts get as `params["fit"]`, and recording yours |
 | `plan model.stl out.gcode.3mf` | Show the Studio command without running it |
@@ -355,7 +372,7 @@ Every problem comes with a `fix` telling you what to change in the script.
 
 ## Use it from your agent
 
-After `print3d setup`, ask your agent for a part. In Claude Code:
+After `print3d setup`, ask your agent for a part. In Claude Code or Hermes:
 
 ```text
 /print3d a 40mm nameplate that says MARCO
@@ -370,6 +387,11 @@ Codex, Cursor and Gemini get the same steps through MCP: `guide`, `make`,
 `fit_coupon` and `fits`. Tools that make pictures (the
 coordinate grid, the plate preview, the likeness overlays) return them as
 images, so the agent sees what it built.
+
+Every run also writes `jobs/<slug>/view.html`: the model in 3D, to rotate, zoom,
+hide parts and pull them apart. It is one self-contained file (three.js loads
+from a CDN). In the Hermes desktop app the agent opens it in the preview pane
+beside the chat; anywhere else, open it in a browser.
 
 ## Develop
 

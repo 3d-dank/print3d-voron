@@ -22,6 +22,10 @@ where = ["src"]
 [tool.setuptools.package-data]
 print3d = ["profiles/*/*", "skill/*.md", "skill/references/*.md", "coupons/*.py"]
 
+[tool.uv]
+# `uvx --from <checkout>` (the Hermes plugin's mcp.json) rebuilds when the code changes.
+cache-keys = [{ file = "pyproject.toml" }, { file = "src/**/*.py" }, { file = "src/**/*.md" }, { file = "src/**/*.json" }, { git = { commit = true } }]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]

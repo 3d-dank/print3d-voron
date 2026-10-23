@@ -94,6 +94,12 @@ Read the PNG at `plate_png` (each `plates[].png` for several plates), and each
 The numbers go green on parts that are printable and still wrong — mirrored text, a hole in the wrong face, letters too shallow
 to read. Look before you hand it over.
 
+`viewer` is `jobs/<slug>/view.html`: the model in 3D, to rotate, zoom, hide parts
+and pull them apart. When you have a preview pane (Hermes desktop's
+`desktop_preview`, action `open`, with that path as the url), open it there so
+the user can turn the part around beside the chat. Otherwise give the path to
+open in a browser. `print3d view <slug>` rebuilds it for an older job.
+
 ## 6. Hand off
 
 ```bash

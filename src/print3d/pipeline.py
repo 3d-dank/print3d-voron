@@ -37,6 +37,7 @@ from print3d.printability import (
 from print3d.project import extract_plate_png, inspect_project
 from print3d.spec import load_spec, model_dims
 from print3d.studio import SliceRequest, assemble_list, run_slice, slice_plan
+from print3d.viewer import build_viewer
 
 MODEL_SCRIPT = "model.py"
 HISTORY = "history.jsonl"
@@ -205,6 +206,8 @@ def run_job(
             ),
         }
     )
+    viewer = build_viewer(job_dir, report)
+    report["viewer"] = str(viewer) if viewer else None
     (job_dir / "report.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
     _append_history(
         job_dir,
@@ -408,6 +411,8 @@ def _run_parts(
             ),
         }
     )
+    viewer = build_viewer(job_dir, report)
+    report["viewer"] = str(viewer) if viewer else None
     (job_dir / "report.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
     _append_history(
         job_dir,

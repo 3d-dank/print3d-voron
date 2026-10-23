@@ -1,0 +1,10 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json",
+  "mcpServers": {
+    "print3d": {
+      "type": "stdio",
+      "command": "uvx",
+      "args": ["--from", "${PLUGIN_ROOT}", "print3d", "mcp"]
+    }
+  }
+}

@@ -23,6 +23,7 @@ from print3d.paths import coupon_script, default_jobs_dir, skill_dir
 from print3d.photo import grid as draw_grid
 from print3d.photo import meet as cross
 from print3d.pipeline import run_job
+from print3d.viewer import build_viewer
 from print3d.printability import advise, analyze_mesh, analyze_slice
 
 INSTRUCTIONS = """\
@@ -37,7 +38,9 @@ likeness check against the photo. To replace something sold in a shop, read
 guide("from-listing"): the listing's stated sizes and product photos stand in for
 the object. For more than one part, colours, or parts that fit together, read
 guide("parts"). Once a job is green, `handoff` writes a print sheet for the user
-to share. Nothing here sends anything to the printer.
+to share. Each run also writes `viewer`, an HTML page with the model in 3D: open
+it in your preview pane when you have one, or give the user its path. Nothing
+here sends anything to the printer.
 """
 
 GUIDES = {
@@ -277,6 +280,17 @@ def likeness(slug: str, mesh: str | None = None) -> list[Any]:
     results, notes = check_job(_job(slug), Path(mesh) if mesh else None)
     payload = {"likeness": results, "advice": [note.as_dict() for note in notes]}
     return _with_images(payload, [r["overlay"] for r in results])
+
+
+@tool()
+def view(slug: str) -> str:
+    """Rebuild jobs/<slug>/view.html, the model in 3D, from the job's last run. Returns its path."""
+    job_dir = _job(slug)
+    report = json.loads((job_dir / "report.json").read_text(encoding="utf-8"))
+    viewer = build_viewer(job_dir, report)
+    if viewer is None:
+        raise ValueError(f"No mesh in {job_dir}; run make first.")
+    return str(viewer)
 
 
 @tool()

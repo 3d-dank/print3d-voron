@@ -21,6 +21,7 @@ from print3d.pipeline import _model_params, run_job
 from print3d.printability import advise, analyze_mesh, analyze_slice
 from print3d.project import inspect_project
 from print3d.studio import SliceRequest, find_studio, slice_plan
+from print3d.viewer import build_viewer
 
 
 def _print_json(payload: object) -> None:
@@ -142,6 +143,20 @@ def cmd_handoff(args: argparse.Namespace) -> int:
             render=not args.no_render,
         )
     )
+    return 0
+
+
+def cmd_view(args: argparse.Namespace) -> int:
+    job_dir = default_jobs_dir() / args.slug
+    report_path = job_dir / "report.json"
+    if not report_path.is_file():
+        print(f"No report in {job_dir}; run make first.", file=sys.stderr)
+        return 1
+    viewer = build_viewer(job_dir, json.loads(report_path.read_text(encoding="utf-8")))
+    if viewer is None:
+        print(f"No mesh in {job_dir}; run make first.", file=sys.stderr)
+        return 1
+    print(viewer)
     return 0
 
 
@@ -352,6 +367,10 @@ def build_parser() -> argparse.ArgumentParser:
     handoff_cmd.add_argument("--no-render", action="store_true", help="Skip the Blender renders")
     handoff_cmd.set_defaults(func=cmd_handoff)
 
+    view_cmd = sub.add_parser("view", help="Rebuild jobs/<slug>/view.html, the model in 3D to rotate")
+    view_cmd.add_argument("slug")
+    view_cmd.set_defaults(func=cmd_view)
+
     coupon_cmd = sub.add_parser("coupon", help="Slice the fit coupon that calibrates press/snug/slide/free")
     coupon_cmd.add_argument("--dry-run", action="store_true")
     coupon_cmd.set_defaults(func=cmd_coupon)
@@ -367,7 +386,7 @@ def build_parser() -> argparse.ArgumentParser:
     mcp_cmd = sub.add_parser("mcp", help="Run the MCP server on stdio")
     mcp_cmd.set_defaults(func=cmd_mcp)
 
-    setup_cmd = sub.add_parser("setup", help="Register print3d with Claude Code, Codex, Cursor and Gemini")
+    setup_cmd = sub.add_parser("setup", help="Register print3d with Claude Code, Codex, Cursor, Gemini and Hermes")
     setup_cmd.add_argument("--agent", action="append", choices=installer.AGENTS,
                            help="Only this agent (repeatable). Default: every one found")
     setup_cmd.add_argument("--dry-run", action="store_true", help="Show the plan and change nothing")
