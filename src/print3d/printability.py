@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import math
 import re
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -51,6 +51,7 @@ class Advice:
     severity: str  # "error" | "warn" | "note"
     message: str
     fix: str
+    part: str | None = None
 
     def as_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -203,11 +204,14 @@ def _minutes(estimate: str | None) -> float | None:
     return round(total, 1) if total else None
 
 
-def advise(
-    mesh: dict[str, Any], slice_: dict[str, Any] | None = None, extra: list[Advice] = ()
-) -> list[Advice]:
-    """Actionable notes, phrased as changes to make in the model script."""
-    notes: list[Advice] = list(extra)
+def corroborates_layer_jump(mesh: dict[str, Any]) -> bool:
+    """A layer jump only means mid-air material where the mesh already shows a raised overhang."""
+    return mesh["overhang_fraction"] >= OVERHANG_FRACTION_WARN and mesh["highest_overhang_mm"] > BED_CHAMFER_MM
+
+
+def mesh_advice(mesh: dict[str, Any], part: str | None = None) -> list[Advice]:
+    """What the triangles of one printed object say, before slicing."""
+    notes: list[Advice] = []
     fraction = mesh["overhang_fraction"]
     if fraction >= OVERHANG_FRACTION_ERROR:
         notes.append(
@@ -265,48 +269,62 @@ def advise(
                 "Thicken it to at least 1.2 mm so it gets more than a couple of perimeters.",
             )
         )
+    return [replace(note, part=part) for note in notes]
 
-    if slice_:
-        minutes = slice_.get("estimated_minutes")
-        if minutes and minutes > LONG_PRINT_MIN:
-            notes.append(
-                Advice(
-                    "duration",
-                    "note",
-                    f"Estimated {minutes:.0f} min.",
-                    "Scale the part down or raise layer height if that is longer than you want.",
-                )
+
+def slice_advice(slice_: dict[str, Any], corroborated: bool) -> list[Advice]:
+    """What one sliced plate says."""
+    notes: list[Advice] = []
+    minutes = slice_.get("estimated_minutes")
+    if minutes and minutes > LONG_PRINT_MIN:
+        notes.append(
+            Advice(
+                "duration",
+                "note",
+                f"Estimated {minutes:.0f} min.",
+                "Scale the part down or raise layer height if that is longer than you want.",
             )
-        # A material jump alone means nothing: the sparse-infill-to-top-shell
-        # transition looks identical. Only trust it where the mesh already shows
-        # an unsupported region, and the gcode carries no feature comments to
-        # tell the two apart.
-        growth = slice_.get("max_layer_growth") or 0.0
-        corroborated = (
-            mesh["overhang_fraction"] >= OVERHANG_FRACTION_WARN
-            and mesh["highest_overhang_mm"] > BED_CHAMFER_MM
         )
-        if growth > LAYER_GROWTH_WARN and corroborated:
-            notes.append(
-                Advice(
-                    "layer_jump",
-                    "warn",
-                    f"Material per layer jumps {growth:.1f}x at z="
-                    f"{slice_.get('max_layer_growth_z')} mm, which is new area starting in mid air.",
-                    "Check that step in the plate preview; chamfer it if it is an unsupported ledge.",
-                )
+    # A material jump alone means nothing: the sparse-infill-to-top-shell
+    # transition looks identical. Only trust it where the mesh already shows
+    # an unsupported region, and the gcode carries no feature comments to
+    # tell the two apart.
+    growth = slice_.get("max_layer_growth") or 0.0
+    if growth > LAYER_GROWTH_WARN and corroborated:
+        notes.append(
+            Advice(
+                "layer_jump",
+                "warn",
+                f"Material per layer jumps {growth:.1f}x at z="
+                f"{slice_.get('max_layer_growth_z')} mm, which is new area starting in mid air.",
+                "Check that step in the plate preview; chamfer it if it is an unsupported ledge.",
             )
-        if slice_.get("printed_layers", 0) < 3:
-            notes.append(
-                Advice(
-                    "too_flat",
-                    "warn",
-                    f"Only {slice_.get('printed_layers')} printed layers.",
-                    "Below about 0.6 mm the part is a sticker; raise its height.",
-                )
+        )
+    if slice_.get("printed_layers", 0) < 3:
+        notes.append(
+            Advice(
+                "too_flat",
+                "warn",
+                f"Only {slice_.get('printed_layers')} printed layers.",
+                "Below about 0.6 mm the part is a sticker; raise its height.",
             )
+        )
+    return notes
+
+
+def advise(
+    mesh: dict[str, Any], slice_: dict[str, Any] | None = None, extra: list[Advice] = ()
+) -> list[Advice]:
+    """Actionable notes, phrased as changes to make in the model script."""
+    notes = [*extra, *mesh_advice(mesh)]
+    if slice_:
+        notes.extend(slice_advice(slice_, corroborates_layer_jump(mesh)))
+    return with_clean(notes)
+
+
+def with_clean(notes: list[Advice]) -> list[Advice]:
     if not notes:
-        notes.append(Advice("clean", "note", "No printability problems found.", "Ready to review in Studio."))
+        notes = [Advice("clean", "note", "No printability problems found.", "Ready to review in Studio.")]
     return notes
 
 

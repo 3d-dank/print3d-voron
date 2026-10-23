@@ -17,6 +17,10 @@ def default_profiles_dir() -> Path:
     return PACKAGE / "profiles" / "x2d-0.4"
 
 
+def coupon_script() -> Path:
+    return PACKAGE / "coupons" / "fit_coupon.py"
+
+
 def skill_dir() -> Path:
     return PACKAGE / "skill"
 

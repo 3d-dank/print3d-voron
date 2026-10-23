@@ -83,3 +83,71 @@ def test_shelf_bracket_from_its_listing(tmp_path: Path):
     assert report["model"]["size_mm"][2] == pytest.approx(20.0, abs=0.01)
     [likeness] = report["likeness"]
     assert likeness["iou"] > 0.88
+
+
+def test_lidded_box_in_two_colours(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("PRINT3D_FITS", str(tmp_path / "fits.json"))
+    report = run_job('a lidded box that says "BOX"', script=repo_root() / "examples" / "lidded_box.py",
+                     jobs_dir=tmp_path, execute=True)
+    assert report["status"] == "ready_for_review", report["advice"]
+    assert [p["name"] for p in report["parts"]] == ["body", "lid", "name"]
+    assert {f["color"]: f["used_g"] > 0 for f in report["filaments"]} == {"white": True, "black": True}
+    [fit] = report["fits"]
+    assert (fit["declared"], fit["verdict"]) == ("slide", "ok")
+    assert fit["clearance_mm"] == pytest.approx(0.2, abs=0.01)
+    assert Path(report["open_in_studio"]).is_file()
+
+
+def test_a_flush_cutter_buries_the_inlay(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("PRINT3D_FITS", str(tmp_path / "fits.json"))
+    source = (repo_root() / "examples" / "lidded_box.py").read_text()
+    script = tmp_path / "flush.py"
+    script.write_text(source.replace('top + 1.0), "DIFFERENCE")', 'top), "DIFFERENCE")'))
+    report = run_job("a lidded box", script=script, jobs_dir=tmp_path, execute=False)
+    assert report["severity"] == "error"
+    assert ("buried", "name") in {(a["code"], a["part"]) for a in report["advice"]}
+
+
+def test_fit_coupon_slices_clean(tmp_path: Path):
+    from print3d.paths import coupon_script
+
+    report = run_job("fit coupon", script=coupon_script(), jobs_dir=tmp_path, execute=True)
+    assert report["status"] == "ready_for_review", report["advice"]
+    assert {p["name"] for p in report["parts"]} == {"holes", "pin"}
+    assert report["model"]["non_manifold_edges"] == 0
+
+
+def test_pen_caddy_fits_and_plates(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("PRINT3D_FITS", str(tmp_path / "fits.json"))
+    report = run_job("a rotating pen caddy", script=repo_root() / "examples" / "pen_caddy.py",
+                     jobs_dir=tmp_path, execute=True)
+    assert report["status"] == "ready_for_review", report["advice"]
+    declared = {(f["a"], f["b"]): (f["declared"], f["verdict"], f["clearance_mm"])
+                for f in report["fits"] if f["declared"]}
+    assert declared == {
+        ("base", "axle"): ("press", "ok", pytest.approx(0.05, abs=0.01)),
+        ("axle", "cap"): ("snug", "ok", pytest.approx(0.10, abs=0.01)),
+        ("axle", "cup"): ("free", "ok", pytest.approx(0.35, abs=0.01)),
+    }
+    assert [p["objects"] for p in report["plates"]] == [["base", "axle", "cap"], ["cup"]]
+    axle = next(p for p in report["parts"] if p["name"] == "axle")
+    assert axle["settings"] == {"wall_loops": "6", "sparse_infill_density": "100%"}
+    assert all(f["used_g"] > 0 for f in report["filaments"])
+
+
+def test_hinged_tin_from_a_museum_photo(tmp_path: Path, monkeypatch):
+    from test_tin_benchmark import build_spec
+
+    monkeypatch.setenv("PRINT3D_FITS", str(tmp_path / "fits.json"))
+    build_spec(tmp_path / "sd_cards")
+    report = run_job('recreate this tin, "SD CARDS" on the lid', script=repo_root() / "examples" / "tobacco_tin.py",
+                     jobs_dir=tmp_path, execute=True)
+    assert report["status"] == "ready_for_review", report["advice"]
+    assert report["model"]["non_manifold_edges"] == 0
+    [likeness] = report["likeness"]
+    assert likeness["iou"] > 0.98
+    assert {(f["a"], f["b"]): f["verdict"] for f in report["fits"] if f["declared"]} == {
+        ("body", "lid"): "ok", ("body", "pin"): "ok", ("lid", "pin"): "ok",
+    }
+    assert {f["color"] for f in report["filaments"]} == {"gold", "black"}
+    assert len(report["plates"]) == 1

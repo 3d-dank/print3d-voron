@@ -18,13 +18,25 @@ from typing import Any
 
 from print3d.blender import BlenderError, run_model_script, scaffold_script
 from print3d.brief import PrintBrief, parse_brief
-from print3d.dfm import require_printable
+from print3d.dfm import check_mesh, require_printable
+from print3d.filaments import DEFAULT_COLOUR, NOZZLES, colour_hex, job_filaments
+from print3d.fits import fit_advice, load_fits
 from print3d.likeness import check_likeness, likeness_advice
 from print3d.paths import default_jobs_dir, default_profiles_dir
-from print3d.printability import advise, analyze_mesh, analyze_slice, worst_severity
+from print3d.printability import (
+    Advice,
+    advise,
+    analyze_mesh,
+    analyze_slice,
+    corroborates_layer_jump,
+    mesh_advice,
+    slice_advice,
+    with_clean,
+    worst_severity,
+)
 from print3d.project import extract_plate_png, inspect_project
 from print3d.spec import load_spec, model_dims
-from print3d.studio import SliceRequest, run_slice, slice_plan
+from print3d.studio import SliceRequest, assemble_list, run_slice, slice_plan
 
 MODEL_SCRIPT = "model.py"
 HISTORY = "history.jsonl"
@@ -94,6 +106,7 @@ def run_job(
             )
 
     report: dict[str, Any] = {"brief": brief.as_dict(), "job_dir": str(job_dir)}
+    fits = load_fits()
     spec = load_spec(job_dir)
     if spec["dims"] or spec["unknowns"]:
         report["spec"] = {"dims": spec["dims"], "unknowns": spec["unknowns"]}
@@ -112,11 +125,16 @@ def run_job(
         mesh_path = job_dir / "mesh" / f"{brief.slug}.stl"
         try:
             report["model"] = run_model_script(
-                model_script, mesh_path, params={**_model_params(brief), "dims": model_dims(spec)}
+                model_script,
+                mesh_path,
+                params={**_model_params(brief), "dims": model_dims(spec), "fit": fits["clearance_mm"]},
             )
         except BlenderError as exc:
             raise PipelineError(str(exc)) from exc
         report["model"]["source"] = "blender"
+
+    if report["model"].get("parts"):
+        return _run_parts(brief, job_dir, profiles, spec, fits, mesh_path, report, execute)
 
     # 3. Is it even a solid?
     dfm = require_printable(mesh_path)
@@ -134,7 +152,11 @@ def run_job(
         output_project_3mf=job_dir / "slice" / f"{brief.slug}.3mf",
         machine=profiles / "machine.json",
         process=profiles / "process.json",
-        filaments=(profiles / "filament.json",),
+        filaments=(
+            tuple(job_filaments(profiles / "filament.json", [brief.color_name], job_dir / "filaments"))
+            if brief.color_name
+            else (profiles / "filament.json",)
+        ),
         datadir=job_dir / "studio-datadir",
         output_dir=job_dir / "slice",
         # Auto-orient would silently rotate the part and invalidate every
@@ -195,6 +217,209 @@ def run_job(
             "estimated_minutes": slice_metrics["estimated_minutes"],
             "filament_g": slice_metrics["filament_g"],
             "codes": [note.code for note in notes],
+            "likeness": {r["view"]: r["iou"] for r in likeness},
+        },
+    )
+    return report
+
+
+def _run_parts(
+    brief: PrintBrief,
+    job_dir: Path,
+    profiles: Path,
+    spec: dict[str, Any],
+    fits: dict[str, Any],
+    assembly: Path,
+    report: dict[str, Any],
+    execute: bool,
+) -> dict[str, Any]:
+    """Several printed parts: a check per printed object, fits between them, one slice for all."""
+    model = report["model"]
+    parts = {part["name"]: part for part in model["parts"]}
+
+    colours: list[str] = []
+    for part in parts.values():
+        part["color"] = part["color"] or brief.color_name or DEFAULT_COLOUR
+        colour_hex(part["color"])
+        key = part["color"].strip().lower()
+        if key not in colours:
+            colours.append(key)
+        part["filament"] = colours.index(key) + 1
+    filaments = job_filaments(profiles / "filament.json", colours, job_dir / "filaments")
+    report["filaments"] = [
+        {"filament": i, "color": c, "hex": colour_hex(c)} for i, c in enumerate(colours, start=1)
+    ]
+
+    # Plates are numbered 1..n for Studio, in the order the script named them.
+    named = sorted({obj["plate"] or 1 for obj in model["objects"]})
+    for obj in model["objects"]:
+        obj["plate"] = named.index(obj["plate"] or 1) + 1
+        for name in obj["parts"]:
+            parts[name]["plate"], parts[name]["object"] = obj["plate"], obj["name"]
+
+    notes: list[Advice] = []
+    errors: list[str] = []
+    metrics: dict[str, dict[str, Any]] = {}
+    for obj in model["objects"]:
+        dfm = check_mesh(Path(obj["stl"]))
+        errors.extend(f"{obj['name']}: {error}" for error in dfm.errors)
+        metrics[obj["name"]] = analyze_mesh(Path(obj["stl"]))
+        notes.extend(mesh_advice(metrics[obj["name"]], part=obj["name"]))
+    for name in model.get("buried", []):
+        notes.append(
+            Advice(
+                "buried",
+                "error",
+                f"{name} is sealed inside {parts[name]['object']}: none of its surface shows, so its "
+                "colour will not either.",
+                "Cut its pocket with a cutter that breaks through the surface (taller than the "
+                "pocket), not one flush with it.",
+                part=name,
+            )
+        )
+    if errors:
+        raise PipelineError("; ".join(errors))
+    if len(colours) > NOZZLES:
+        notes.append(
+            Advice(
+                "colours",
+                "note",
+                f"{len(colours)} colours on {NOZZLES} nozzles: Studio swaps filament within a nozzle, "
+                "purging at every change.",
+                "Fine with an AMS; otherwise keep to two colours per plate.",
+            )
+        )
+    report["mesh_metrics"] = metrics
+
+    likeness = check_likeness(assembly, spec, job_dir / "likeness")
+    if likeness:
+        report["likeness"] = likeness
+    notes.extend(likeness_advice(likeness))
+    notes.extend(fit_advice(model["fits"], model["declared_fits"], fits["clearance_mm"]))
+    report["fits"] = model["fits"]
+    report["fit_clearance_mm"] = fits["clearance_mm"]
+    report["parts"] = [
+        {k: part[k] for k in ("name", "object", "plate", "color", "filament", "print_size_mm", "settings")}
+        for part in parts.values()
+    ]
+
+    slice_dir = job_dir / "slice"
+    slice_dir.mkdir(parents=True, exist_ok=True)
+    assemble = slice_dir / "assemble.json"
+    assemble.write_text(
+        json.dumps(
+            assemble_list(
+                [
+                    {
+                        "plate": obj["plate"],
+                        "parts": [
+                            {
+                                "stl": parts[name]["print_stl"],
+                                "filament": parts[name]["filament"],
+                                "settings": parts[name]["settings"],
+                            }
+                            for name in obj["parts"]
+                        ],
+                    }
+                    for obj in model["objects"]
+                ]
+            ),
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    request = SliceRequest(
+        input_mesh=assembly,
+        output_3mf=slice_dir / f"{brief.slug}.gcode.3mf",
+        output_project_3mf=slice_dir / f"{brief.slug}.3mf",
+        machine=profiles / "machine.json",
+        process=profiles / "process.json",
+        filaments=tuple(filaments),
+        datadir=job_dir / "studio-datadir",
+        output_dir=slice_dir,
+        orient=False,
+        assemble_list=assemble,
+    )
+    report["slice_plan"] = slice_plan(request)
+
+    if not execute:
+        notes = with_clean(notes)
+        report.update(status="dry_run", advice=[n.as_dict() for n in notes], severity=worst_severity(notes))
+        return report
+
+    slice_result = run_slice(request)
+    project = Path(slice_result["output_3mf"])
+    inspection = inspect_project(project)
+    # Per plate, slice_info has every filament; the gcode header weighs only the first.
+    by_plate = {p["index"]: p for p in inspection["slice_info_parsed"].get("plates", [])}
+    used: dict[int, float] = {}
+    for info in by_plate.values():
+        for f in info["filaments"]:
+            used[int(f["id"])] = round(used.get(int(f["id"]), 0.0) + float(f.get("used_g", 0)), 2)
+    plates = []
+    for plate in inspection["plates"]:
+        index = plate["index"]
+        metrics_ = analyze_slice(project, index)
+        on_plate = [metrics[obj["name"]] for obj in model["objects"] if obj["plate"] == index]
+        notes.extend(slice_advice(metrics_, any(corroborates_layer_jump(m) for m in on_plate)))
+        png = extract_plate_png(project, slice_dir / f"{brief.slug}_plate_{index}.png", plate=index)
+        plates.append(
+            {
+                "plate": index,
+                "objects": [obj["name"] for obj in model["objects"] if obj["plate"] == index],
+                "png": str(png) if png else None,
+                **{k: v for k, v in metrics_.items() if k not in ("layers", "plate")},
+            }
+        )
+        if by_plate.get(index, {}).get("weight_g") is not None:
+            plates[-1]["filament_g"] = by_plate[index]["weight_g"]
+    for filament in report["filaments"]:
+        filament["used_g"] = used.get(filament["filament"])
+    notes = with_clean(notes)
+    severity = worst_severity(notes)
+    minutes = [p["estimated_minutes"] for p in plates if p["estimated_minutes"] is not None]
+    grams = [p["filament_g"] for p in plates if p["filament_g"] is not None]
+
+    report.update(
+        {
+            "status": "needs_work" if severity == "error" else "ready_for_review",
+            "slice_result": {
+                "returncode": slice_result["returncode"],
+                "output_3mf": slice_result["output_3mf"],
+                "output_project_3mf": slice_result.get("output_project_3mf"),
+                "output_size_bytes": slice_result["output_size_bytes"],
+            },
+            "inspection": {"plates": inspection["plates"], "path": inspection["path"]},
+            "plates": plates,
+            "plate_png": plates[0]["png"] if plates else None,
+            "slice_metrics": {
+                "estimated_minutes": round(sum(minutes), 1) if minutes else None,
+                "filament_g": round(sum(grams), 2) if grams else None,
+                "plates": len(plates),
+            },
+            "advice": [n.as_dict() for n in notes],
+            "severity": severity,
+            "open_in_studio": slice_result.get("output_project_3mf"),
+            "next_step": (
+                "Fix the errors in the model script and run again."
+                if severity == "error"
+                else "Open the .3mf in Bambu Studio, check each plate, and print from there."
+            ),
+        }
+    )
+    (job_dir / "report.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+    _append_history(
+        job_dir,
+        {
+            "at": time.strftime("%Y-%m-%dT%H:%M:%S"),
+            "severity": severity,
+            "size_mm": [round(v, 2) for v in model["size_mm"]],
+            "parts": {name: part["color"] for name, part in parts.items()},
+            "estimated_minutes": report["slice_metrics"]["estimated_minutes"],
+            "filament_g": report["slice_metrics"]["filament_g"],
+            "codes": [n.code for n in notes],
+            "fits": {f"{f['a']}/{f['b']}": f["clearance_mm"] for f in model["fits"]},
             "likeness": {r["view"]: r["iou"] for r in likeness},
         },
     )

@@ -94,6 +94,16 @@ def _rebuild_model_settings(files: dict[str, bytes]) -> bytes:
     return xml.encode("utf-8")
 
 
+def _parses(xml: bytes | None) -> bool:
+    if not xml:
+        return False
+    try:
+        ET.fromstring(xml)
+    except ET.ParseError:
+        return False
+    return True
+
+
 def repair_bambu_3mf(path: Path) -> Path:
     resolved = path.expanduser().resolve()
     if not resolved.is_file():
@@ -102,7 +112,10 @@ def repair_bambu_3mf(path: Path) -> Path:
         files = {name: archive.read(name) for name in archive.namelist()}
     if "3D/Objects/object_1.model" not in files and "3D/3dmodel.model" not in files:
         raise RepairError(f"{resolved} has no 3D model members")
-    files["Metadata/model_settings.config"] = _rebuild_model_settings(files)
+    # Only a settings file Studio cannot parse is rebuilt, and the rebuild knows
+    # one object: a valid multi-part file is left as Studio wrote it.
+    if not _parses(files.get("Metadata/model_settings.config")):
+        files["Metadata/model_settings.config"] = _rebuild_model_settings(files)
     plate = files.get("Metadata/plate_1.png")
     small = files.get("Metadata/plate_1_small.png") or plate
     if plate:
@@ -139,8 +152,4 @@ def is_well_formed_model_settings(path: Path) -> bool:
     with zipfile.ZipFile(path) as archive:
         if "Metadata/model_settings.config" not in archive.namelist():
             return False
-        try:
-            ET.fromstring(archive.read("Metadata/model_settings.config"))
-        except ET.ParseError:
-            return False
-    return True
+        return _parses(archive.read("Metadata/model_settings.config"))
