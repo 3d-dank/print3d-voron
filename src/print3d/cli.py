@@ -15,7 +15,7 @@ from print3d.fits import KINDS, load_fits, save_fits
 from print3d.flatten import flatten_x2d
 from print3d.handoff import build_handoff
 from print3d.likeness import check_job
-from print3d.paths import coupon_script, default_jobs_dir, default_profiles_dir
+from print3d.paths import coupon_script, default_profiles_dir, job_path, safe_name
 from print3d.photo import grid, meet
 from print3d.pipeline import _model_params, run_job
 from print3d.printability import advise, analyze_mesh, analyze_slice
@@ -85,7 +85,7 @@ def cmd_grid(args: argparse.Namespace) -> int:
 
 
 def cmd_measure(args: argparse.Namespace) -> int:
-    job_dir = default_jobs_dir() / args.slug
+    job_dir = job_path(args.slug)
     spec = specs.load_spec(job_dir)
     if args.action == "scale":
         result = specs.set_scale(
@@ -96,7 +96,7 @@ def cmd_measure(args: argparse.Namespace) -> int:
         width, height = (float(v) for v in args.size.split(","))
         result = specs.rectify_view(
             spec, args.view, Path(args.photo), specs.parse_points(args.corners, count=4),
-            (width, height), job_dir / "views" / f"{args.view}.png", look=args.look, up=args.up,
+            (width, height), job_dir / "views" / f"{safe_name(args.view, 'view')}.png", look=args.look, up=args.up,
         )
     elif args.action == "dim" and args.source == "listing":
         result = specs.listing_dim(spec, args.name, args.mm, args.quote, args.tolerance)
@@ -129,7 +129,7 @@ def cmd_meet(args: argparse.Namespace) -> int:
 
 
 def cmd_likeness(args: argparse.Namespace) -> int:
-    results, notes = check_job(default_jobs_dir() / args.slug, Path(args.mesh) if args.mesh else None)
+    results, notes = check_job(job_path(args.slug), Path(args.mesh) if args.mesh else None)
     _print_json({"likeness": results, "advice": [note.as_dict() for note in notes]})
     return 1 if any(note.severity == "error" for note in notes) else 0
 
@@ -137,7 +137,7 @@ def cmd_likeness(args: argparse.Namespace) -> int:
 def cmd_handoff(args: argparse.Namespace) -> int:
     _print_json(
         build_handoff(
-            default_jobs_dir() / args.slug,
+            job_path(args.slug),
             cost_per_kg=args.cost_per_kg,
             currency=args.currency or "",
             render=not args.no_render,
@@ -147,7 +147,7 @@ def cmd_handoff(args: argparse.Namespace) -> int:
 
 
 def cmd_view(args: argparse.Namespace) -> int:
-    job_dir = default_jobs_dir() / args.slug
+    job_dir = job_path(args.slug)
     report_path = job_dir / "report.json"
     if not report_path.is_file():
         print(f"No report in {job_dir}; run make first.", file=sys.stderr)

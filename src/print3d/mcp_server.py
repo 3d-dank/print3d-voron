@@ -14,12 +14,13 @@ from typing import Any, Literal
 
 from mcp.server.mcpserver import Image, MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
+from mcp.types import ToolAnnotations
 
 from print3d import spec as specs
 from print3d.fits import load_fits, save_fits
 from print3d.handoff import build_handoff
 from print3d.likeness import check_job
-from print3d.paths import coupon_script, default_jobs_dir, skill_dir
+from print3d.paths import coupon_script, job_path, safe_name, skill_dir
 from print3d.photo import grid as draw_grid
 from print3d.photo import meet as cross
 from print3d.pipeline import run_job
@@ -54,8 +55,12 @@ GUIDES = {
 server = MCPServer("print3d", instructions=INSTRUCTIONS)
 
 
-def tool(*, images: bool = False):
-    """Register a tool. print3d errors already say what to change, so the agent gets their text."""
+def tool(*, images: bool = False, read_only: bool = False):
+    """Register a tool. print3d errors already say what to change, so the agent gets their text.
+
+    `read_only` tools only read, or write views derived from what is there, so
+    hosts can run them without asking.
+    """
 
     def register(fn):
         @functools.wraps(fn)
@@ -65,7 +70,8 @@ def tool(*, images: bool = False):
             except Exception as exc:  # noqa: BLE001
                 raise ToolError(str(exc)) from exc
 
-        return server.tool(structured_output=False if images else None)(wrapper)
+        annotations = ToolAnnotations(read_only_hint=True) if read_only else None
+        return server.tool(structured_output=False if images else None, annotations=annotations)(wrapper)
 
     return register
 
@@ -74,19 +80,15 @@ def _json(payload: Any) -> str:
     return json.dumps(payload, indent=2)
 
 
-def _job(slug: str) -> Path:
-    return default_jobs_dir() / slug
-
-
 def _saved(slug: str, spec: dict[str, Any], entry: Any) -> str:
-    return _json({"saved": str(specs.save_spec(_job(slug), spec)), "entry": entry})
+    return _json({"saved": str(specs.save_spec(job_path(slug), spec)), "entry": entry})
 
 
 def _with_images(payload: dict[str, Any], paths: list[str | None]) -> list[Any]:
     return [_json(payload), *(Image(path=p) for p in paths if p and Path(p).is_file())]
 
 
-@tool()
+@tool(read_only=True)
 def guide(topic: Literal["workflow", "modelling", "from-photo", "from-listing", "parts"]) -> str:
     """How to use print3d: the loop, bpy recipes and gotchas, reverse-engineering from a photo or a
     shop listing, and multi-part, multi-colour models with fits."""
@@ -123,7 +125,7 @@ def handoff(slug: str, cost_per_kg: float | None = None, currency: str | None = 
 
     Run it once the job is green. Returns the paths, then the renders.
     """
-    result = build_handoff(_job(slug), cost_per_kg=cost_per_kg, currency=currency or "")
+    result = build_handoff(job_path(slug), cost_per_kg=cost_per_kg, currency=currency or "")
     return _with_images(result, list(result["renders"].values()))
 
 
@@ -146,7 +148,7 @@ def fits(
     return _json(save_fits(values) if values else load_fits())
 
 
-@tool(images=True)
+@tool(images=True, read_only=True)
 def grid(photo: str, crop: list[float] | None = None, step: int | None = None) -> list[Any]:
     """A photo, or a zoomed crop [x0, y0, x1, y1] of it, with photo-pixel coordinates drawn on.
 
@@ -176,7 +178,7 @@ def measure_scale(
     `points` are the reference's two ends. Views front/back/left/right/top/bottom
     set the camera axes; for another pose pass look/up (+x, -y, ...) in the printed part.
     """
-    spec = specs.load_spec(_job(slug))
+    spec = specs.load_spec(job_path(slug))
     entry = specs.set_scale(spec, view, Path(photo), ref, points, look=look, up=up)
     return _saved(slug, spec, entry)
 
@@ -197,13 +199,13 @@ def measure_rectify(
     should appear square-on. Returns the rectified image: read every later point
     for this view off it.
     """
-    spec = specs.load_spec(_job(slug))
-    out = _job(slug) / "views" / f"{view}.png"
+    spec = specs.load_spec(job_path(slug))
+    out = job_path(slug) / "views" / f"{safe_name(view, 'view')}.png"
     entry = specs.rectify_view(spec, view, Path(photo), corners, (size_mm[0], size_mm[1]), out, look=look, up=up)
     return _with_images(json.loads(_saved(slug, spec, entry)), [str(out)])
 
 
-@tool()
+@tool(read_only=True)
 def meet(edge_a: list[list[float]], edge_b: list[list[float]]) -> str:
     """Where two edges cross, each given as two points: a corner hidden behind something."""
     return _json({"corner": list(cross(*edge_a, *edge_b))})
@@ -227,7 +229,7 @@ def measure_dim(
     `tolerance_mm` when the listing rounds coarser than whole millimetres (5 for cm).
     The model script reads it as params["dims"][name].
     """
-    spec = specs.load_spec(_job(slug))
+    spec = specs.load_spec(job_path(slug))
     if mm is not None and source == "listing":
         entry = specs.listing_dim(spec, name, mm, quote, tolerance_mm)
     elif mm is not None:
@@ -247,7 +249,7 @@ def measure_outline(
 
     Every outlined view adds a likeness check to `make`.
     """
-    spec = specs.load_spec(_job(slug))
+    spec = specs.load_spec(job_path(slug))
     entry = specs.set_outline(spec, view, points=points, mask=Path(mask) if mask else None)
     return _saved(slug, spec, entry)
 
@@ -257,35 +259,35 @@ def set_listing(
     slug: str, url: str, name: str | None = None, price: float | None = None, currency: str | None = None
 ) -> str:
     """The product this part replaces: its shop page, name and price."""
-    spec = specs.load_spec(_job(slug))
+    spec = specs.load_spec(job_path(slug))
     return _saved(slug, spec, specs.set_listing(spec, url, name, price, currency))
 
 
 @tool()
 def add_unknown(slug: str, text: str) -> str:
     """Record something no photo shows, for the user to check on the printed part."""
-    spec = specs.load_spec(_job(slug))
+    spec = specs.load_spec(job_path(slug))
     return _saved(slug, spec, specs.add_unknown(spec, text))
 
 
-@tool()
+@tool(read_only=True)
 def show_spec(slug: str) -> str:
     """Everything recorded about the object: views, dimensions with their evidence, unknowns."""
-    return _json(specs.load_spec(_job(slug)))
+    return _json(specs.load_spec(job_path(slug)))
 
 
-@tool(images=True)
+@tool(images=True, read_only=True)
 def likeness(slug: str, mesh: str | None = None) -> list[Any]:
     """Compare the job's mesh with every outlined photo view. Returns results, advice and overlays."""
-    results, notes = check_job(_job(slug), Path(mesh) if mesh else None)
+    results, notes = check_job(job_path(slug), Path(mesh) if mesh else None)
     payload = {"likeness": results, "advice": [note.as_dict() for note in notes]}
     return _with_images(payload, [r["overlay"] for r in results])
 
 
-@tool()
+@tool(read_only=True)
 def view(slug: str) -> str:
     """Rebuild jobs/<slug>/view.html, the model in 3D, from the job's last run. Returns its path."""
-    job_dir = _job(slug)
+    job_dir = job_path(slug)
     report = json.loads((job_dir / "report.json").read_text(encoding="utf-8"))
     viewer = build_viewer(job_dir, report)
     if viewer is None:
@@ -293,7 +295,7 @@ def view(slug: str) -> str:
     return str(viewer)
 
 
-@tool()
+@tool(read_only=True)
 def check(mesh: str, project: str | None = None) -> str:
     """Printability of an existing STL, and of its sliced .gcode.3mf when given."""
     mesh_metrics = analyze_mesh(Path(mesh))

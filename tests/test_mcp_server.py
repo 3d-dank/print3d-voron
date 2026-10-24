@@ -71,3 +71,28 @@ def test_a_bad_call_is_an_error_not_a_crash(jobs):
                                        "points": [[0, 0], [1, 1]]}))
     assert result.is_error
     assert "no scale yet" in result.content[0].text
+
+
+@pytest.mark.parametrize("slug", ["../escape", "/tmp/escape", "a/b", "", "UP"])
+def test_a_slug_cannot_leave_the_jobs_folder(jobs, slug):
+    [result] = _call(("add_unknown", {"slug": slug, "text": "x"}))
+    assert result.is_error
+    assert not (jobs.parent / "escape").exists()
+
+
+def test_a_view_name_cannot_leave_the_job(tmp_path, jobs):
+    photo = _photo(tmp_path / "photo.png")
+    [result] = _call(("measure_rectify", {"slug": "l", "view": "../../../escape", "photo": str(photo),
+                                          "corners": [[0, 0], [10, 0], [10, 10], [0, 10]],
+                                          "size_mm": [10, 10]}))
+    assert result.is_error
+    assert not list(tmp_path.rglob("escape.png"))
+
+
+def test_only_read_tools_skip_the_prompt():
+    async def hints():
+        async with Client(server) as client:
+            return {t.name for t in (await client.list_tools()).tools
+                    if t.annotations and t.annotations.read_only_hint}
+
+    assert anyio.run(hints) == {"guide", "show_spec", "meet", "grid", "check", "likeness", "view"}

@@ -47,6 +47,9 @@ The plugin brings two things:
   through `uvx`; the first start takes a moment while uv builds it.
 - **The print3d skill**, the workflow the agent follows from brief to hand-off.
 
+You don't need `print3d setup` for this: the plugin registers the server
+itself, so there is no Hermes config to edit.
+
 Start a new session afterwards. `hermes plugins update print3d` updates both;
 `hermes plugins remove print3d` removes both.
 
@@ -88,7 +91,11 @@ for a hand-off and you also get a [print sheet](#hand-it-off).
 
 - **Local programs:** Blender, to run the model scripts the agent writes and to
   render, and Bambu Studio's command line, to slice. Both run as child processes
-  on your machine, headless.
+  on your machine, headless. A model script is Python: Blender runs it with your
+  user's permissions, outside Hermes's terminal sandbox. The plugin marks its
+  server untrusted, so Hermes asks before any tool that runs a script or writes
+  files (`make`, `fit_coupon`, `handoff`, `measure_*`, `fits` with values);
+  the read-only tools run without asking.
 - **Files:** jobs are written to `~/print3d/jobs` (or `$PRINT3D_JOBS`), and
   print3d reads the photos you point it at. Your printer clearances are saved in
   `~/print3d/fits.json`.
