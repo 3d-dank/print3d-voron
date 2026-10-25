@@ -14,6 +14,7 @@ import shutil
 import subprocess
 import sys
 import time
+import tomllib
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -75,7 +76,11 @@ def _merge_mcp_json(path: Path) -> None:
     _write_with_backup(path, json.dumps(config, indent=2) + "\n")
 
 
-CODEX_SECTION = re.compile(rf"^\[mcp_servers\.{NAME}\]\n(?:(?!\[).*\n?)*", re.MULTILINE)
+CODEX_SECTION = re.compile(
+    rf"^[ \t]*\[mcp_servers\.{NAME}\][ \t]*(?:#[^\n]*)?(?:\n|$)"
+    r"(?:(?![ \t]*\[)[^\n]*\n)*(?:(?![ \t]*\[)[^\n]+$)?",
+    re.MULTILINE,
+)
 
 
 def _merge_codex_toml(path: Path) -> None:
@@ -86,10 +91,21 @@ def _merge_codex_toml(path: Path) -> None:
         f"args = {json.dumps(args)}\n"
     )
     text = path.read_text(encoding="utf-8") if path.is_file() else ""
+    try:
+        tomllib.loads(text)
+    except tomllib.TOMLDecodeError as exc:
+        raise SetupError(f"{path} is not valid TOML ({exc}); fix it and run setup again.") from exc
     if CODEX_SECTION.search(text):
-        text = CODEX_SECTION.sub(block + "\n", text, count=1)
+        # A replacement string would interpret the backslashes in Windows paths.
+        text = CODEX_SECTION.sub(lambda _: block + "\n", text, count=1)
     else:
         text = (text.rstrip("\n") + "\n\n" if text.strip() else "") + block
+    try:
+        tomllib.loads(text)
+    except tomllib.TOMLDecodeError as exc:
+        raise SetupError(
+            f"Cannot update {path} safely as TOML ({exc}); add print3d by hand. The file was not changed."
+        ) from exc
     _write_with_backup(path, text)
 
 
