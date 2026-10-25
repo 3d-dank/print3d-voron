@@ -145,7 +145,10 @@ def build_handoff(
         raise HandoffError(f"No run in {job_dir}: run `print3d make` first.")
     report = json.loads(report_path.read_text(encoding="utf-8"))
     if report.get("status") not in ("ready_for_review", "needs_work"):
-        raise HandoffError(f"The last run of {job_dir.name} did not slice; run `print3d make` without --dry-run.")
+        raise HandoffError(
+            f"The last run of {job_dir.name} is {report.get('status', 'incomplete')}; "
+            "complete `print3d make` without --dry-run before handing it off."
+        )
     slug = job_dir.name
     spec = load_spec(job_dir)
     parts = _parts(report, slug)
