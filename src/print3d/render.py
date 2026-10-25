@@ -101,7 +101,8 @@ def render_parts(
     out_png = out_png.expanduser().resolve()
     out_png.parent.mkdir(parents=True, exist_ok=True)
     binary = find_blender()
-    with tempfile.TemporaryDirectory() as tmp:
+    # Beside the output, not in /tmp: a flatpak Blender sees the home folder but not the host's /tmp.
+    with tempfile.TemporaryDirectory(prefix=".blender-", dir=out_png.parent) as tmp:
         script = Path(tmp) / "render.py"
         script.write_text(_RENDER, encoding="utf-8")
         command = [

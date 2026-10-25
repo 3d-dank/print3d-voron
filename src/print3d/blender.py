@@ -26,6 +26,22 @@ from typing import Any
 BLENDER_ENV = "BLENDER_BIN"
 DEFAULT_TIMEOUT = 600
 
+# Every place plugin.json tells Hermes to look, so a Blender that passes the
+# install check is also found here. tests/test_plugin.py keeps the two in step.
+BLENDER_LOCATIONS = (
+    "/Applications/Blender.app/Contents/MacOS/Blender",
+    "~/Applications/Blender.app/Contents/MacOS/Blender",
+    "~/Library/Application Support/Steam/steamapps/common/Blender/Blender.app/Contents/MacOS/Blender",
+    "/opt/homebrew/bin/blender",
+    "/usr/local/bin/blender",
+    "/usr/bin/blender",
+    "/var/lib/flatpak/exports/bin/org.blender.Blender",
+    "~/.local/share/flatpak/exports/bin/org.blender.Blender",
+    "/snap/bin/blender",
+    "~/.steam/steam/steamapps/common/Blender/blender",
+    "~/.local/share/Steam/steamapps/common/Blender/blender",
+)
+
 
 class BlenderError(RuntimeError):
     """Raised when Blender is missing or a model script fails."""
@@ -39,14 +55,7 @@ def find_blender(search_path: str | None = None) -> Path:
     which = shutil.which("blender", path=search_path)
     if which:
         candidates.append(which)
-    candidates.extend(
-        [
-            "/Applications/Blender.app/Contents/MacOS/Blender",
-            "/opt/homebrew/bin/blender",
-            "/usr/local/bin/blender",
-            "/usr/bin/blender",
-        ]
-    )
+    candidates.extend(BLENDER_LOCATIONS)
     for candidate in candidates:
         path = Path(candidate).expanduser()
         if path.is_file():
@@ -411,7 +420,8 @@ def run_model_script(
     out_mesh.parent.mkdir(parents=True, exist_ok=True)
     binary = blender or find_blender()
 
-    with tempfile.TemporaryDirectory() as tmp:
+    # Beside the output, not in /tmp: a flatpak Blender sees the home folder but not the host's /tmp.
+    with tempfile.TemporaryDirectory(prefix=".blender-", dir=out_mesh.parent) as tmp:
         harness = Path(tmp) / "harness.py"
         harness.write_text(_HARNESS, encoding="utf-8")
         result_path = Path(tmp) / "result.json"
