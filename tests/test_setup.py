@@ -1,6 +1,7 @@
 import json
 import subprocess
 import sys
+import tomllib
 
 import pytest
 
@@ -30,6 +31,50 @@ def test_codex_section_is_added_once_and_keeps_the_rest(tmp_path):
     assert 'model = "o5"' in text and "[mcp_servers.other]" in text
     assert json.dumps(sys.executable) in text
     assert list(config.parent.glob("config.toml.print3d-backup-*"))
+
+
+def test_codex_update_preserves_windows_command_escapes(tmp_path, monkeypatch):
+    command = r"C:\Users\Alice\Python\python.exe"
+    monkeypatch.setattr(setup, "server_command", lambda: [command, "-m", "print3d", "mcp"])
+    config = tmp_path / "config.toml"
+    setup._merge_codex_toml(config)
+    setup._merge_codex_toml(config)
+    server = tomllib.loads(config.read_text())["mcp_servers"]["print3d"]
+    assert server == {"command": command, "args": ["-m", "print3d", "mcp"]}
+
+
+@pytest.mark.parametrize("header", [
+    "[mcp_servers.print3d] # existing server",
+    "  [mcp_servers.print3d] \t# existing server",
+])
+def test_codex_update_accepts_comments_and_keeps_following_tables(tmp_path, monkeypatch, header):
+    monkeypatch.setattr(setup, "server_command", lambda: ["/usr/bin/python", "-m", "print3d", "mcp"])
+    config = tmp_path / "config.toml"
+    other = '  [mcp_servers.other] # keep this comment\ncommand = "other-server"\n'
+    config.write_text(f'model = "example"\n{header}\ncommand = "/old/python"\n\n{other}')
+    setup._merge_codex_toml(config)
+    text = config.read_text()
+    parsed = tomllib.loads(text)
+    assert parsed["model"] == "example"
+    assert parsed["mcp_servers"] == {
+        "print3d": {"command": "/usr/bin/python", "args": ["-m", "print3d", "mcp"]},
+        "other": {"command": "other-server"},
+    }
+    assert other in text
+
+
+@pytest.mark.parametrize("original", [
+    "[not valid TOML",
+    # A valid spelling the text editor cannot recognize must not become a duplicate table.
+    '[mcp_servers."print3d"]\ncommand = "old"\n',
+])
+def test_codex_invalid_or_unsupported_toml_is_left_alone(tmp_path, original):
+    config = tmp_path / "config.toml"
+    config.write_text(original)
+    with pytest.raises(setup.SetupError, match="TOML"):
+        setup._merge_codex_toml(config)
+    assert config.read_text() == original
+    assert not list(tmp_path.glob("config.toml.print3d-backup-*"))
 
 
 def test_json_configs_keep_other_servers(tmp_path):
