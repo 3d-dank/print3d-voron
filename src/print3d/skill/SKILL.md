@@ -7,9 +7,10 @@ disable-model-invocation: true
 
 # /print3d — idea to a printable X2D part
 
-`print3d` below is the print3d command line. When the shell cannot find it, the
-print3d MCP tools of the same names do the same work. A job's files live in the
-report's `job_dir`, written below as `jobs/<slug>`.
+`print3d` below is the print3d command line. When you have the print3d MCP
+tools, use those of the same names instead: they return the plate preview and
+overlays as images, and the host can ask the user before each one that writes.
+A job's files live in the report's `job_dir`, written below as `jobs/<slug>`.
 
 ```
 idea / photo / text  →  model.py (Blender)  →  mesh  →  DFM + printability

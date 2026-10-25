@@ -16,3 +16,5 @@ def test_hermes_plugin_matches_the_package():
     assert server["args"][-2:] == ["print3d", "mcp"]
     hermes = manifest["extensions"]["com.nousresearch.hermes"]
     assert hermes["servers"]["print3d"]["trust"] == "untrusted"
+    assert hermes["servers"]["print3d"]["requires"] == {"app": True, "min_version": "4.2"}
+    assert "Blender](https://www.blender.org/download/) 4.2+" in (ROOT / "README.md").read_text()
