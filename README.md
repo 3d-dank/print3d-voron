@@ -359,6 +359,10 @@ is still unknown, and the open notes. The Studio `.3mf`, the 3D view and an STL
 per part, in print pose, sit next to it. The sheet is one self-contained HTML
 file that prints to A4.
 
+After rerunning a job, handoff requires the latest run to complete slicing.
+A failed, interrupted or dry-run attempt blocks a new handoff until another
+run completes without `--dry-run`. Existing handoff files are left in place.
+
 ## What gets checked
 
 - **The mesh:** overhangs steeper than 45°, bed contact, tall-and-narrow parts,
