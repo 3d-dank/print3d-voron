@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Any
 
 from print3d.dfm import read_stl
+from print3d.gcode_stats import is_prusaslicer, minutes, parse_prusaslicer
 from print3d.project import read_plate_gcode
 
 # Slope measured from the horizontal plane: 0 deg is a flat ceiling, 90 deg a
@@ -122,20 +123,30 @@ def analyze_mesh(path: Path, *, slope_deg: float = OVERHANG_SLOPE_DEG) -> dict[s
 
 
 def analyze_slice(project: Path, plate: int = 1) -> dict[str, Any]:
-    """Per-layer material from the gcode. No feature comments needed."""
-    gcode = read_plate_gcode(project, plate)
-    header, _, body = gcode.partition("CONFIG_BLOCK_END")
+    """Per-layer material from one plate of a sliced Bambu project."""
+    return analyze_gcode(read_plate_gcode(project, plate), plate)
 
+
+def analyze_gcode(gcode: str, plate: int = 1) -> dict[str, Any]:
+    """Per-layer material from the gcode. No feature comments needed."""
     estimated_time = None
     weight_g = None
     layer_count = None
-    for line in header.splitlines():
-        if match := TIME_RE.search(line):
-            estimated_time = match.group(1).rstrip(";").strip()
-        if match := WEIGHT_RE.search(line):
-            weight_g = float(match.group(1))
-        if match := LAYERS_RE.search(line):
-            layer_count = int(match.group(1))
+    if is_prusaslicer(gcode):
+        stats = parse_prusaslicer(gcode)
+        estimated_time, weight_g, layer_count = stats.estimated_time, stats.filament_g, stats.layer_count
+        body = gcode
+    else:
+        header, sep, body = gcode.partition("CONFIG_BLOCK_END")
+        if not sep:
+            header, body = "", gcode
+        for line in header.splitlines():
+            if match := TIME_RE.search(line):
+                estimated_time = match.group(1).rstrip(";").strip()
+            if match := WEIGHT_RE.search(line):
+                weight_g = float(match.group(1))
+            if match := LAYERS_RE.search(line):
+                layer_count = int(match.group(1))
 
     # Z-hops and travel moves revisit a height many times, so bin extrusion by Z
     # rather than starting a layer on every Z change.
@@ -182,7 +193,7 @@ def analyze_slice(project: Path, plate: int = 1) -> dict[str, Any]:
     return {
         "plate": plate,
         "estimated_time": estimated_time,
-        "estimated_minutes": _minutes(estimated_time),
+        "estimated_minutes": minutes(estimated_time),
         "filament_g": weight_g,
         "layer_count": layer_count or len(layers),
         "printed_layers": len(layers),
@@ -193,15 +204,6 @@ def analyze_slice(project: Path, plate: int = 1) -> dict[str, Any]:
         "max_layer_growth_z": growth_z,
         "layers": layers,
     }
-
-
-def _minutes(estimate: str | None) -> float | None:
-    if not estimate:
-        return None
-    total = 0.0
-    for value, unit in re.findall(r"(\d+(?:\.\d+)?)\s*([hms])", estimate):
-        total += float(value) * {"h": 60.0, "m": 1.0, "s": 1 / 60.0}[unit]
-    return round(total, 1) if total else None
 
 
 def corroborates_layer_jump(mesh: dict[str, Any]) -> bool:
@@ -275,13 +277,13 @@ def mesh_advice(mesh: dict[str, Any], part: str | None = None) -> list[Advice]:
 def slice_advice(slice_: dict[str, Any], corroborated: bool) -> list[Advice]:
     """What one sliced plate says."""
     notes: list[Advice] = []
-    minutes = slice_.get("estimated_minutes")
-    if minutes and minutes > LONG_PRINT_MIN:
+    est = slice_.get("estimated_minutes")
+    if est and est > LONG_PRINT_MIN:
         notes.append(
             Advice(
                 "duration",
                 "note",
-                f"Estimated {minutes:.0f} min.",
+                f"Estimated {est:.0f} min.",
                 "Scale the part down or raise layer height if that is longer than you want.",
             )
         )

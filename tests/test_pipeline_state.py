@@ -10,9 +10,9 @@ from print3d import pipeline
 from print3d.blender import BlenderError
 from print3d.dfm import DfmError
 from print3d.handoff import HandoffError, build_handoff
-from print3d.studio import StudioError
+from print3d.slicer import PlateResult, SlicerError, SliceResult
 
-GOLDEN = Path(__file__).parent / "fixtures" / "cube_20mm.gcode.3mf"
+GCODE = Path(__file__).parent / "fixtures" / "prusa_two_tool.gcode"
 
 
 @pytest.fixture(params=[False, True], ids=["single", "declared-parts"])
@@ -43,18 +43,23 @@ def job(tmp_path, monkeypatch, request):
             )
         return result
 
-    def slice_(request):
-        if state["failure"] == "slice":
-            raise StudioError("slice failed")
-        request.output_dir.mkdir(parents=True, exist_ok=True)
-        for dest in (request.output_3mf, request.output_project_3mf):
-            shutil.copyfile(GOLDEN, dest)
-        return {"returncode": 0, "output_3mf": str(request.output_3mf),
-                "output_project_3mf": str(request.output_project_3mf),
-                "output_size_bytes": request.output_3mf.stat().st_size}
+    class FakeSlicer:
+        def plan(self, job):
+            return {"dry_run": True}
+
+        def slice(self, job, timeout_s=180):
+            if state["failure"] == "slice":
+                raise SlicerError("slice failed")
+            job.out_dir.mkdir(parents=True, exist_ok=True)
+            gcode = job.out_dir / f"{job.slug}.gcode"
+            review = job.out_dir / f"{job.slug}.3mf"
+            shutil.copyfile(GCODE, gcode)
+            review.write_bytes(b"3mf")
+            plate = PlateResult(1, gcode, None, review, {1: 4.45, 2: 2.37}, 6.82)
+            return SliceResult(0, [plate], gcode, gcode.stat().st_size, review)
 
     monkeypatch.setattr(pipeline, "run_model_script", model)
-    monkeypatch.setattr(pipeline, "run_slice", slice_)
+    monkeypatch.setattr(pipeline, "slicer_for", lambda printer: FakeSlicer())
 
     def run(**kwargs):
         return pipeline.run_job("state test cube", script=script, jobs_dir=tmp_path / "jobs", **kwargs)
@@ -87,7 +92,7 @@ def test_failed_rerun_blocks_handoff_and_preserves_previous_delivery(job, failur
     previous_sheet = sheet.read_bytes()
     state.update(failure=failure, side=300 if failure == "dfm" else 30)
     expected = {"model": pipeline.PipelineError, "dfm": (DfmError, pipeline.PipelineError),
-                "slice": StudioError}[failure]
+                "slice": SlicerError}[failure]
     with pytest.raises(expected) as error:
         run()
     with pytest.raises(HandoffError):

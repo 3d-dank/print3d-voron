@@ -1,0 +1,17 @@
+name = "Bambu Lab X2D 0.4 mm"
+backend = "bambu"
+bed_mm = [256, 256, 260]
+default_material = "PLA"
+
+[[tools]]
+klipper = ""
+nozzle_mm = 0.4
+head = "left"
+
+[[tools]]
+klipper = ""
+nozzle_mm = 0.4
+head = "right"
+
+[materials]
+PLA = "filament.json"

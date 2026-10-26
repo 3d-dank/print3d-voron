@@ -1,10 +1,10 @@
-"""Idea to a reviewable Bambu Studio project.
+"""Idea to a reviewable slicer project.
 
     prompt or photos  ->  Blender model script  ->  mesh  ->  DFM + printability
          |                    ^                                + likeness to the photos
      spec.json                +---- advice tells you what to fix ---+
                                               |
-                                        slice -> .3mf -> review in Studio
+                                        slice -> .3mf -> review in the slicer
 
 The loop stops at review. Nothing is ever sent to the printer from here.
 """
@@ -19,24 +19,24 @@ from typing import Any
 from print3d.blender import BlenderError, run_model_script, scaffold_script
 from print3d.brief import PrintBrief, parse_brief
 from print3d.dfm import check_mesh, require_printable
-from print3d.filaments import DEFAULT_COLOUR, NOZZLES, colour_hex, job_filaments
+from print3d.filaments import DEFAULT_COLOUR, colour_hex
 from print3d.fits import fit_advice, load_fits
 from print3d.likeness import check_likeness, likeness_advice
-from print3d.paths import default_jobs_dir, default_profiles_dir
+from print3d.paths import default_jobs_dir
 from print3d.printability import (
     Advice,
     advise,
     analyze_mesh,
-    analyze_slice,
+    analyze_gcode,
     corroborates_layer_jump,
     mesh_advice,
     slice_advice,
     with_clean,
     worst_severity,
 )
-from print3d.project import extract_plate_png, inspect_project
+from print3d.printer import Printer, load_printer
 from print3d.spec import load_spec, model_dims
-from print3d.studio import SliceRequest, assemble_list, run_slice, slice_plan
+from print3d.slicer import Part, SliceJob, SliceResult, slicer_for
 from print3d.viewer import build_viewer
 
 MODEL_SCRIPT = "model.py"
@@ -45,6 +45,37 @@ HISTORY = "history.jsonl"
 
 class PipelineError(RuntimeError):
     """Raised when a job cannot be prepared."""
+
+
+def _slicer_name(printer: Printer) -> str:
+    return "PrusaSlicer" if printer.backend == "prusaslicer" else "Bambu Studio"
+
+
+def _slice_result(result: SliceResult) -> dict[str, Any]:
+    return {
+        "returncode": result.returncode,
+        "output_3mf": str(result.output),
+        "output_project_3mf": str(result.review_3mf),
+        "output_size_bytes": result.output_size_bytes,
+        "gcode": [str(p.gcode) for p in result.plates],
+    }
+
+
+def _inspection(result: SliceResult, metrics: list[dict[str, Any]]) -> dict[str, Any]:
+    return {
+        "plates": [
+            {
+                "index": p.index,
+                "gcode_path": str(p.gcode),
+                "png_path": str(p.png) if p.png else None,
+                "estimated_time": m["estimated_time"],
+                "filament_g": p.weight_g,
+                "layer_count": m["layer_count"],
+            }
+            for p, m in zip(result.plates, metrics)
+        ],
+        "path": str(result.review_3mf),
+    }
 
 
 def _model_params(brief: PrintBrief) -> dict[str, Any]:
@@ -101,7 +132,7 @@ def run_job(
     color: str | None = None,
     execute: bool = True,
     jobs_dir: Path | None = None,
-    profiles_dir: Path | None = None,
+    printer: str | None = None,
 ) -> dict[str, Any]:
     brief = parse_brief(prompt, color=color)
     job_dir = (jobs_dir or default_jobs_dir()) / brief.slug
@@ -113,7 +144,7 @@ def run_job(
     try:
         result = _run_job(
             brief, job_dir, report, script=script, mesh=mesh, execute=execute,
-            profiles=profiles_dir or default_profiles_dir(),
+            printer=load_printer(printer),
         )
     except Exception as exc:
         report.update(status="failed", error=str(exc))
@@ -131,14 +162,9 @@ def _run_job(
     script: Path | None,
     mesh: Path | None,
     execute: bool,
-    profiles: Path,
+    printer: Printer,
 ) -> dict[str, Any]:
-    for required in ("machine.json", "process.json", "filament.json"):
-        if not (profiles / required).is_file():
-            raise PipelineError(
-                f"Pinned profile missing: {profiles / required}. Run: python -m print3d flatten"
-            )
-
+    report["printer"] = printer.key
     fits = load_fits()
     spec = load_spec(job_dir)
     if spec["dims"] or spec["unknowns"]:
@@ -167,10 +193,10 @@ def _run_job(
         report["model"]["source"] = "blender"
 
     if report["model"].get("parts"):
-        return _run_parts(brief, job_dir, profiles, spec, fits, mesh_path, report, execute)
+        return _run_parts(brief, job_dir, printer, spec, fits, mesh_path, report, execute)
 
     # 3. Is it even a solid?
-    dfm = require_printable(mesh_path)
+    dfm = require_printable(mesh_path, bed_mm=printer.bed_mm)
     report["dfm"] = dfm.as_dict()
     mesh_metrics = analyze_mesh(mesh_path)
     report["mesh_metrics"] = mesh_metrics
@@ -179,24 +205,15 @@ def _run_job(
         report["likeness"] = likeness
     likeness_notes = likeness_advice(likeness)
 
-    request = SliceRequest(
-        input_mesh=mesh_path,
-        output_3mf=job_dir / "slice" / f"{brief.slug}.gcode.3mf",
-        output_project_3mf=job_dir / "slice" / f"{brief.slug}.3mf",
-        machine=profiles / "machine.json",
-        process=profiles / "process.json",
-        filaments=(
-            tuple(job_filaments(profiles / "filament.json", [brief.color_name], job_dir / "filaments"))
-            if brief.color_name
-            else (profiles / "filament.json",)
-        ),
-        datadir=job_dir / "studio-datadir",
-        output_dir=job_dir / "slice",
-        # Auto-orient would silently rotate the part and invalidate every
-        # overhang note below. Orientation is the model script's business.
-        orient=False,
+    slicer = slicer_for(printer)
+    job = SliceJob(
+        printer,
+        [Part(brief.slug, mesh_path, 1)],
+        job_dir / "slice",
+        brief.slug,
+        (brief.color_name,) if brief.color_name else (),
     )
-    report["slice_plan"] = slice_plan(request)
+    report["slice_plan"] = slicer.plan(job)
 
     if not execute:
         report["status"] = "dry_run"
@@ -206,35 +223,27 @@ def _run_job(
         return report
 
     # 4. Slice, then read back what the slicer actually did.
-    slice_result = run_slice(request)
-    project = Path(slice_result["output_3mf"])
-    inspection = inspect_project(project)
-    png = extract_plate_png(project, job_dir / "slice" / f"{brief.slug}_plate.png")
-    slice_metrics = analyze_slice(project)
+    result = slicer.slice(job)
+    plate = result.plates[0]
+    slice_metrics = analyze_gcode(plate.gcode.read_text(encoding="utf-8", errors="replace"), plate.index)
     notes = advise(mesh_metrics, slice_metrics, extra=likeness_notes)
     severity = worst_severity(notes)
 
     report.update(
         {
             "status": "needs_work" if severity == "error" else "ready_for_review",
-            "slice_result": {
-                "returncode": slice_result["returncode"],
-                "output_3mf": slice_result["output_3mf"],
-                "output_project_3mf": slice_result.get("output_project_3mf"),
-                "output_size_bytes": slice_result["output_size_bytes"],
-            },
-            "inspection": {"plates": inspection["plates"], "path": inspection["path"]},
-            "plate_png": str(png) if png else None,
+            "slice_result": _slice_result(result),
+            "inspection": _inspection(result, [slice_metrics]),
+            "plate_png": str(plate.png) if plate.png else None,
             "slice_metrics": {k: v for k, v in slice_metrics.items() if k != "layers"},
             "layers": slice_metrics["layers"],
             "advice": [note.as_dict() for note in notes],
             "severity": severity,
-            "open_in_studio": slice_result.get("open_in_studio")
-            or slice_result.get("output_project_3mf"),
+            "open_in_studio": str(result.review_3mf),
             "next_step": (
                 "Fix the errors in the model script and run again."
                 if severity == "error"
-                else "Open the .3mf in Bambu Studio, check the preview, and print it from there."
+                else f"Open the .3mf in {_slicer_name(printer)}, check the preview, and print it from there."
             ),
         }
     )
@@ -260,7 +269,7 @@ def _run_job(
 def _run_parts(
     brief: PrintBrief,
     job_dir: Path,
-    profiles: Path,
+    printer: Printer,
     spec: dict[str, Any],
     fits: dict[str, Any],
     assembly: Path,
@@ -279,7 +288,8 @@ def _run_parts(
         if key not in colours:
             colours.append(key)
         part["filament"] = colours.index(key) + 1
-    filaments = job_filaments(profiles / "filament.json", colours, job_dir / "filaments")
+    if printer.backend == "prusaslicer" and len(colours) > len(printer.tools):
+        raise PipelineError(f"{len(colours)} colours, {len(printer.tools)} tools on {printer.key}.")
     report["filaments"] = [
         {"filament": i, "color": c, "hex": colour_hex(c)} for i, c in enumerate(colours, start=1)
     ]
@@ -295,7 +305,7 @@ def _run_parts(
     errors: list[str] = []
     metrics: dict[str, dict[str, Any]] = {}
     for obj in model["objects"]:
-        dfm = check_mesh(Path(obj["stl"]))
+        dfm = check_mesh(Path(obj["stl"]), bed_mm=printer.bed_mm)
         errors.extend(f"{obj['name']}: {error}" for error in dfm.errors)
         metrics[obj["name"]] = analyze_mesh(Path(obj["stl"]))
         notes.extend(mesh_advice(metrics[obj["name"]], part=obj["name"]))
@@ -313,12 +323,12 @@ def _run_parts(
         )
     if errors:
         raise PipelineError("; ".join(errors))
-    if len(colours) > NOZZLES:
+    if printer.backend == "bambu" and len(colours) > len(printer.tools):
         notes.append(
             Advice(
                 "colours",
                 "note",
-                f"{len(colours)} colours on {NOZZLES} nozzles: Studio swaps filament within a nozzle, "
+                f"{len(colours)} colours on {len(printer.tools)} nozzles: Studio swaps filament within a nozzle, "
                 "purging at every change.",
                 "Fine with an AMS; otherwise keep to two colours per plate.",
             )
@@ -339,75 +349,55 @@ def _run_parts(
 
     slice_dir = job_dir / "slice"
     slice_dir.mkdir(parents=True, exist_ok=True)
-    assemble = slice_dir / "assemble.json"
-    assemble.write_text(
-        json.dumps(
-            assemble_list(
-                [
-                    {
-                        "plate": obj["plate"],
-                        "parts": [
-                            {
-                                "stl": parts[name]["print_stl"],
-                                "filament": parts[name]["filament"],
-                                "settings": parts[name]["settings"],
-                            }
-                            for name in obj["parts"]
-                        ],
-                    }
-                    for obj in model["objects"]
-                ]
-            ),
-            indent=2,
-        )
-        + "\n",
-        encoding="utf-8",
+    slicer = slicer_for(printer)
+    job = SliceJob(
+        printer,
+        [
+            Part(
+                name,
+                Path(parts[name]["print_stl"]),
+                parts[name]["filament"],
+                plate=obj["plate"],
+                object=obj["name"],
+                settings=parts[name]["settings"],
+            )
+            for obj in model["objects"]
+            for name in obj["parts"]
+        ],
+        slice_dir,
+        brief.slug,
+        tuple(colours),
     )
-    request = SliceRequest(
-        input_mesh=assembly,
-        output_3mf=slice_dir / f"{brief.slug}.gcode.3mf",
-        output_project_3mf=slice_dir / f"{brief.slug}.3mf",
-        machine=profiles / "machine.json",
-        process=profiles / "process.json",
-        filaments=tuple(filaments),
-        datadir=job_dir / "studio-datadir",
-        output_dir=slice_dir,
-        orient=False,
-        assemble_list=assemble,
-    )
-    report["slice_plan"] = slice_plan(request)
+    report["slice_plan"] = slicer.plan(job)
 
     if not execute:
         notes = with_clean(notes)
         report.update(status="dry_run", advice=[n.as_dict() for n in notes], severity=worst_severity(notes))
         return report
 
-    slice_result = run_slice(request)
-    project = Path(slice_result["output_3mf"])
-    inspection = inspect_project(project)
-    # Per plate, slice_info has every filament; the gcode header weighs only the first.
-    by_plate = {p["index"]: p for p in inspection["slice_info_parsed"].get("plates", [])}
+    result = slicer.slice(job)
     used: dict[int, float] = {}
-    for info in by_plate.values():
-        for f in info["filaments"]:
-            used[int(f["id"])] = round(used.get(int(f["id"]), 0.0) + float(f.get("used_g", 0)), 2)
+    for plate in result.plates:
+        for tool, grams in plate.grams_by_tool.items():
+            used[tool] = round(used.get(tool, 0.0) + grams, 2)
     plates = []
-    for plate in inspection["plates"]:
-        index = plate["index"]
-        metrics_ = analyze_slice(project, index)
+    all_metrics = []
+    for plate in result.plates:
+        index = plate.index
+        metrics_ = analyze_gcode(plate.gcode.read_text(encoding="utf-8", errors="replace"), index)
+        all_metrics.append(metrics_)
         on_plate = [metrics[obj["name"]] for obj in model["objects"] if obj["plate"] == index]
         notes.extend(slice_advice(metrics_, any(corroborates_layer_jump(m) for m in on_plate)))
-        png = extract_plate_png(project, slice_dir / f"{brief.slug}_plate_{index}.png", plate=index)
         plates.append(
             {
                 "plate": index,
                 "objects": [obj["name"] for obj in model["objects"] if obj["plate"] == index],
-                "png": str(png) if png else None,
+                "png": str(plate.png) if plate.png else None,
                 **{k: v for k, v in metrics_.items() if k not in ("layers", "plate")},
             }
         )
-        if by_plate.get(index, {}).get("weight_g") is not None:
-            plates[-1]["filament_g"] = by_plate[index]["weight_g"]
+        if plate.weight_g is not None:
+            plates[-1]["filament_g"] = plate.weight_g
     for filament in report["filaments"]:
         filament["used_g"] = used.get(filament["filament"])
     notes = with_clean(notes)
@@ -418,13 +408,8 @@ def _run_parts(
     report.update(
         {
             "status": "needs_work" if severity == "error" else "ready_for_review",
-            "slice_result": {
-                "returncode": slice_result["returncode"],
-                "output_3mf": slice_result["output_3mf"],
-                "output_project_3mf": slice_result.get("output_project_3mf"),
-                "output_size_bytes": slice_result["output_size_bytes"],
-            },
-            "inspection": {"plates": inspection["plates"], "path": inspection["path"]},
+            "slice_result": _slice_result(result),
+            "inspection": _inspection(result, all_metrics),
             "plates": plates,
             "plate_png": plates[0]["png"] if plates else None,
             "slice_metrics": {
@@ -434,11 +419,11 @@ def _run_parts(
             },
             "advice": [n.as_dict() for n in notes],
             "severity": severity,
-            "open_in_studio": slice_result.get("output_project_3mf"),
+            "open_in_studio": str(result.review_3mf),
             "next_step": (
                 "Fix the errors in the model script and run again."
                 if severity == "error"
-                else "Open the .3mf in Bambu Studio, check each plate, and print from there."
+                else f"Open the .3mf in {_slicer_name(printer)}, check each plate, and print from there."
             ),
         }
     )

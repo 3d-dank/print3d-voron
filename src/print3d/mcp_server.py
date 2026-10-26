@@ -102,6 +102,7 @@ def make(
     mesh: str | None = None,
     color: str | None = None,
     dry_run: bool = False,
+    printer: str | None = None,
 ) -> list[Any]:
     """Model, check and slice. With no model yet, writes a starter model.py and names its path.
 
@@ -113,6 +114,7 @@ def make(
         mesh=Path(mesh) if mesh else None,
         color=color,
         execute=not dry_run,
+        printer=printer,
     )
     overlays = [r["overlay"] for r in report.get("likeness", [])]
     plates = [p["png"] for p in report.get("plates", [])] or [report.get("plate_png")]

@@ -1,0 +1,26 @@
+name = "Voron 2.4 300 StealthChanger"
+backend = "prusaslicer"
+bed_mm = [300, 300, 280]            # real printable area after docks; measure in phase 4
+bed_exclude = [[200, 250, 300, 300]]  # x0, y0, x1, y1: the notched corner
+default_material = "PLA"
+
+[[tools]]
+klipper = "T0"
+nozzle_mm = 0.4
+head = "Anthead"
+
+[[tools]]
+klipper = "T1"
+nozzle_mm = 0.4
+head = "Galileo 2"
+
+[[tools]]
+klipper = "T2"
+nozzle_mm = 0.4
+head = "Rapido 2F"
+
+[materials]
+PLA = "pla.ini"
+
+[moonraker]
+url = "http://HOST:7125"            # the key comes from MOONRAKER_API_KEY, never this file

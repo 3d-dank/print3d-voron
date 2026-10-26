@@ -11,6 +11,7 @@ from __future__ import annotations
 import base64
 import html
 import json
+import re
 import shutil
 import time
 from pathlib import Path
@@ -19,7 +20,7 @@ from typing import Any
 from print3d.blender import BlenderError
 from print3d.filaments import DEFAULT_COLOUR, colour_hex
 from print3d.fits import load_fits
-from print3d.paths import default_profiles_dir
+from print3d.printer import load_printer
 from print3d.render import render_parts
 from print3d.spec import load_spec
 
@@ -81,9 +82,13 @@ def _parts(report: dict[str, Any], slug: str) -> list[dict[str, Any]]:
     ]
 
 
-def _cost_per_kg() -> float:
-    profile = json.loads((default_profiles_dir() / "filament.json").read_text(encoding="utf-8"))
-    return float(profile["filament_cost"][0])
+def _cost_per_kg(printer: str | None = None) -> float:
+    config = load_printer(printer).config_for(None)
+    text = config.read_text(encoding="utf-8")
+    if config.suffix == ".json":
+        return float(json.loads(text)["filament_cost"][0])
+    match = re.search(r"^filament_cost = ([0-9.]+)", text, re.MULTILINE)
+    return float(match.group(1)) if match else 0.0
 
 
 def _table(head: list[str], rows: list[list[str]]) -> str:
@@ -163,7 +168,7 @@ def build_handoff(
 
     metrics = report.get("slice_metrics", {})
     grams = metrics.get("filament_g")
-    per_kg = cost_per_kg if cost_per_kg is not None else _cost_per_kg()
+    per_kg = cost_per_kg if cost_per_kg is not None else _cost_per_kg(report.get("printer"))
     cost = grams * per_kg / 1000.0 if grams is not None else None
     money = (lambda v: f"{v:.2f} {_esc(currency)}".strip())
     listing = report.get("listing") or spec.get("listing")

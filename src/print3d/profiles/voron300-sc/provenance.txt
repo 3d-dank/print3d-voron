@@ -1,0 +1,9 @@
+PrusaSlicer presets merged into the per-material configs in this folder.
+
+PrusaSlicer version: 2.9.6
+Printer preset: Voron_v2_300_afterburner 0.4 Perfect
+Print preset: 0.2mm 0.4nozzle V3 - ABS Voron 300
+Filament preset (PLA): Basic PLA @VORON - EM100
+Tools: 3
+Generated: 2026-10-26
+Host and physical-printer keys are stripped.

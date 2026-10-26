@@ -16,7 +16,9 @@ def repo_root() -> Path:
 
 
 def default_profiles_dir() -> Path:
-    return PACKAGE / "profiles" / "x2d-0.4"
+    from print3d.printer import load_printer
+
+    return load_printer().dir
 
 
 def coupon_script() -> Path:

@@ -10,9 +10,10 @@ from pathlib import Path
 from typing import Any
 
 from print3d.repair_3mf import repair_bambu_3mf
+from print3d.slicer import SlicerError
 
 
-class StudioError(RuntimeError):
+class StudioError(SlicerError):
     """Raised for Studio discovery or slice failures."""
 
 

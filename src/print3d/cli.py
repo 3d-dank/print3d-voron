@@ -15,12 +15,15 @@ from print3d.fits import KINDS, load_fits, save_fits
 from print3d.flatten import flatten_x2d
 from print3d.handoff import build_handoff
 from print3d.likeness import check_job
-from print3d.paths import coupon_script, default_profiles_dir, job_path, safe_name
+from print3d.paths import coupon_script, job_path, safe_name
 from print3d.photo import grid, meet
 from print3d.pipeline import _model_params, run_job
 from print3d.printability import advise, analyze_mesh, analyze_slice
 from print3d.project import inspect_project
-from print3d.studio import SliceRequest, find_studio, slice_plan
+from print3d.printer import list_printers, load_printer
+from print3d.prusa_slicer import find_prusaslicer
+from print3d.slicer import Part, SliceJob, slicer_for
+from print3d.studio import find_studio
 from print3d.viewer import build_viewer
 
 
@@ -36,6 +39,7 @@ def cmd_make(args: argparse.Namespace) -> int:
         mesh=Path(args.mesh) if args.mesh else None,
         color=args.color,
         execute=not args.dry_run,
+        printer=args.printer,
     )
     _print_json(report)
     return 1 if report.get("severity") == "error" else 0
@@ -51,7 +55,9 @@ def cmd_model(args: argparse.Namespace) -> int:
 
 def cmd_slice(args: argparse.Namespace) -> int:
     mesh = Path(args.mesh)
-    report = run_job(args.prompt or f"slice {mesh.name}", mesh=mesh, execute=not args.dry_run)
+    report = run_job(
+        args.prompt or f"slice {mesh.name}", mesh=mesh, execute=not args.dry_run, printer=args.printer
+    )
     _print_json(report)
     return 1 if report.get("severity") == "error" else 0
 
@@ -161,7 +167,7 @@ def cmd_view(args: argparse.Namespace) -> int:
 
 
 def cmd_coupon(args: argparse.Namespace) -> int:
-    report = run_job("fit coupon", script=coupon_script(), execute=not args.dry_run)
+    report = run_job("fit coupon", script=coupon_script(), execute=not args.dry_run, printer=args.printer)
     report["next_step"] = (
         "Print the .3mf. Push the pin into each hole: the label is the clearance per side in "
         "hundredths of a mm. Then record what you felt, e.g. "
@@ -220,50 +226,63 @@ def cmd_setup(args: argparse.Namespace) -> int:
 
 
 def cmd_flatten(args: argparse.Namespace) -> int:
-    _print_json(flatten_x2d(output_dir=Path(args.output) if args.output else default_profiles_dir()))
+    _print_json(flatten_x2d(output_dir=Path(args.output) if args.output else load_printer("x2d-0.4").dir))
     return 0
 
 
-def cmd_status(_args: argparse.Namespace) -> int:
-    profiles = default_profiles_dir()
+def cmd_status(args: argparse.Namespace) -> int:
+    printer = load_printer(args.printer)
     try:
         blender = str(find_blender())
     except BlenderError as exc:
         blender = f"missing: {exc}"
+    finder, name = (find_prusaslicer, "PrusaSlicer") if printer.backend == "prusaslicer" else (find_studio, "Bambu Studio")
+    try:
+        slicer = str(finder())
+    except Exception as exc:  # noqa: BLE001
+        slicer = f"missing: {exc}"
+    present = all((printer.dir / f).is_file() for f in printer.materials.values())
+    if printer.backend == "bambu":
+        present = present and all((printer.dir / f).is_file() for f in ("machine.json", "process.json"))
     _print_json(
         {
             "blender": blender,
-            "studio": str(find_studio()),
-            "profiles": str(profiles),
-            "profiles_present": all(
-                (profiles / name).is_file()
-                for name in ("machine.json", "process.json", "filament.json")
-            ),
-            "stops_at": "review in Bambu Studio",
+            "printer": printer.key,
+            "backend": printer.backend,
+            "slicer": slicer,
+            "profiles": str(printer.dir),
+            "profiles_present": present,
+            "stops_at": f"review in {name}",
         }
     )
     return 0
 
 
+def cmd_printers(_args: argparse.Namespace) -> int:
+    rows = []
+    for key in list_printers():
+        printer = load_printer(key)
+        rows.append(
+            {"printer": key, "name": printer.name, "backend": printer.backend,
+             "tools": len(printer.tools), "materials": sorted(printer.materials)}
+        )
+    _print_json(rows)
+    return 0
+
+
 def cmd_plan(args: argparse.Namespace) -> int:
-    profiles = default_profiles_dir()
+    printer = load_printer(args.printer)
     output = Path(args.output)
-    request = SliceRequest(
-        input_mesh=Path(args.mesh),
-        output_3mf=output,
-        machine=profiles / "machine.json",
-        process=profiles / "process.json",
-        filaments=(profiles / "filament.json",),
-        datadir=output.parent / "studio-datadir",
-        output_dir=output.parent,
-    )
-    _print_json(slice_plan(request))
+    mesh = Path(args.mesh)
+    slug = output.name.split(".")[0] or mesh.stem
+    job = SliceJob(printer, [Part(slug, mesh, 1)], output.parent, slug)
+    _print_json(slicer_for(printer).plan(job))
     return 0
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="print3d", description="Idea to a reviewable Bambu Studio project for an X2D"
+        prog="print3d", description="Idea to a reviewable slicer project for a Klipper Voron or a Bambu X2D"
     )
     sub = parser.add_subparsers(dest="cmd", required=True)
 
@@ -273,6 +292,7 @@ def build_parser() -> argparse.ArgumentParser:
     make_cmd.add_argument("--mesh", help="Skip modelling and use this STL")
     make_cmd.add_argument("--color")
     make_cmd.add_argument("--dry-run", action="store_true")
+    make_cmd.add_argument("--printer", help="Printer profile (default: $PRINT3D_PRINTER or voron300-sc)")
     make_cmd.set_defaults(func=cmd_make)
 
     model_cmd = sub.add_parser("model", help="Run a Blender model script to an STL")
@@ -286,6 +306,7 @@ def build_parser() -> argparse.ArgumentParser:
     slice_cmd.add_argument("mesh")
     slice_cmd.add_argument("--prompt", default="")
     slice_cmd.add_argument("--dry-run", action="store_true")
+    slice_cmd.add_argument("--printer", help="Printer profile (default: $PRINT3D_PRINTER or voron300-sc)")
     slice_cmd.set_defaults(func=cmd_slice)
 
     check_cmd = sub.add_parser("check", help="Printability of a mesh, and of its slice")
@@ -373,6 +394,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     coupon_cmd = sub.add_parser("coupon", help="Slice the fit coupon that calibrates press/snug/slide/free")
     coupon_cmd.add_argument("--dry-run", action="store_true")
+    coupon_cmd.add_argument("--printer", help="Printer profile (default: $PRINT3D_PRINTER or voron300-sc)")
     coupon_cmd.set_defaults(func=cmd_coupon)
 
     fit_cmd = sub.add_parser("fit", help="Show or record this printer's clearance per fit")
@@ -397,12 +419,17 @@ def build_parser() -> argparse.ArgumentParser:
     flatten_cmd.add_argument("--output")
     flatten_cmd.set_defaults(func=cmd_flatten)
 
+    printers_cmd = sub.add_parser("printers", help="List the printer profiles")
+    printers_cmd.set_defaults(func=cmd_printers)
+
     status_cmd = sub.add_parser("status", help="Show Blender, slicer and profile paths")
+    status_cmd.add_argument("--printer", help="Printer profile (default: $PRINT3D_PRINTER or voron300-sc)")
     status_cmd.set_defaults(func=cmd_status)
 
     plan_cmd = sub.add_parser("plan", help="Print the Studio command without running it")
     plan_cmd.add_argument("mesh")
     plan_cmd.add_argument("output")
+    plan_cmd.add_argument("--printer", help="Printer profile (default: $PRINT3D_PRINTER or voron300-sc)")
     plan_cmd.set_defaults(func=cmd_plan)
     return parser
 
